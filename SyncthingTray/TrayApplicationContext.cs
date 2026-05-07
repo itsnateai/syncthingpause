@@ -956,6 +956,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 // next open. The 10s poll will reconcile if Syncthing's persisted
                 // state diverges (it shouldn't — PATCH 200 means cfg.Save() done).
                 _devicePaused[deviceId] = newPaused;
+                // v2.3.5: also optimistically flip the connection cache so the menu
+                // color matches user intent immediately. Pause click → device shows
+                // as disconnected (red) right away, before the 10s poll catches up
+                // with Syncthing actually closing the connection. Resume click on a
+                // disconnected device → no immediate flip to green (Syncthing has to
+                // actually re-establish the connection); next poll will update.
+                if (newPaused)
+                    _knownDevices[deviceId] = false;
                 // v2.3.3: see TogglePauseFolder for why this is needed — BuildMenu's
                 // cache check doesn't track per-device pause state.
                 _menuBuilt = false;
@@ -990,29 +998,23 @@ internal sealed class TrayApplicationContext : ApplicationContext
         foreach (var d in entries)
         {
             var deviceId = d.Id;
-            var paused = d.Paused;
+            var connected = d.Connected;
             var sub = new ToolStripMenuItem(MenuTextSanitizer.Sanitize(d.Name));
-            // v2.3.4: color by PAUSE state only — this submenu carries pause/resume
-            // actions, so color should match the actionable axis (paused vs active)
-            // not the connection axis (online vs offline). Conflating them produced
-            // "red device but Pause is enabled" cognitive dissonance — the device
-            // was offline (red) AND not paused (Pause enabled), which is correct
-            // Syncthing semantics but reads as a contradiction. Connection state
-            // still lives in the Synced Folders header coloring where its meaning
-            // is purely informational.
-            if (paused) sub.Tag = PausedDimColor;
-            // v2.3.2: show BOTH Resume and Pause always, with the action that matches
-            // the current state greyed out (no-op anyway). Lets you see device state
-            // at a glance without opening the web UI; the available action is the
-            // enabled one. Resume above Pause per the typical "exit-state-first" idiom
-            // (the "way out" of the current state is visually closer to the user's eye).
+            // v2.3.5: color AND action availability driven by connection state per
+            // user spec — green=online → Pause action enabled, red=offline → Resume
+            // action enabled. Pausing a paused device or resuming an active device
+            // is a no-op anyway, so this matches user mental model ("the available
+            // action is the one that flips me to the other state I see in the color").
+            // Edge case: active+disconnected — Resume click is technically a no-op
+            // (already paused=false), but rare and self-resolving on next poll.
+            sub.Tag = connected ? HeaderOnlineColor : HeaderOfflineColor;
             var resumeItem = new ToolStripMenuItem("Resume Device", null,
                 (_, _) => TogglePauseDevice(deviceId, false));
-            resumeItem.Enabled = paused;
+            resumeItem.Enabled = !connected;
             sub.DropDownItems.Add(resumeItem);
             var pauseItem = new ToolStripMenuItem("Pause Device", null,
                 (_, _) => TogglePauseDevice(deviceId, true));
-            pauseItem.Enabled = !paused;
+            pauseItem.Enabled = connected;
             sub.DropDownItems.Add(pauseItem);
             devItem.DropDownItems.Add(sub);
         }

@@ -4,6 +4,12 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.5 — 2026-05-07
+
+### UX
+- **Devices submenu: red/green coloring restored, action availability tied to connection.** v2.3.4 had moved coloring to pause-state only; restored to v2.3.0's connection-driven scheme (green=connected, red=disconnected) per user preference. Action availability now follows the same axis: **Pause Device enabled when connected, Resume Device enabled when disconnected** — the available action is the one that flips you to the state shown by the other color. Folders submenu still uses pause-state coloring (folders don't have a connection axis — they sync via their devices).
+- **Pause click optimistically flips the device's "connected" cache to disconnected** so the menu color flips to red immediately rather than waiting for the next 10s poll to catch up with Syncthing actually closing the connection. Resume click doesn't pre-flip to green — Syncthing has to actually re-establish the connection — but the next poll updates the state when it lands.
+
 ## v2.3.4 — 2026-05-07
 
 ### UX
