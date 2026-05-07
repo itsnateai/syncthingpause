@@ -4,6 +4,12 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.2.41 — 2026-05-07
+
+### Bug fixes (post-v2.2.40 verifier round)
+- **`pause.dat` write is now fully atomic, even under AV-locks.** v2.2.40's `File.Replace` was called with `destinationBackupFileName: null` — if antivirus held the destination open mid-Replace, the original file could be deleted before the rename completed, losing the snapshot. Now passes a `.bak` backup path so a failed Replace leaves a recoverable copy of the prior pause.dat. The backup is cleaned on success; an error-path log line names the .bak so support can recover by hand if needed.
+- **Auto-pause no longer traps users into the empty-snapshot unwedge path.** When auto-pause fired in the rare case where every folder/device was already paused-in-config (e.g., user paused everything via the Syncthing web UI before walking onto public wifi), v2.2.40 still set `_paused=true` and `_autoPaused=true` with an empty snapshot. A subsequent manual "Resume Syncing" click would then hit the empty-snapshot fallback ("unpause everything currently paused") and silently un-pause folders the user had intentionally paused before any of this. Auto-pause now skips the state mutation when nothing was actually flipped — leaves `_paused=false`, doesn't claim `_autoPaused`, and logs an info line.
+
 ## v2.2.40 — 2026-05-07
 
 ### Bug fixes (post-v2.2.39 multi-agent audit)

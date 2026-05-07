@@ -1176,7 +1176,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
                         // v2.2.39: config-level pause via PUT /rest/config (same as MenuPause).
                         // Snapshot what we flip so auto-resume restores exactly that set.
                         var (flippedFolders, flippedDevices, ok) = ApplyConfigPause(targetPaused: true);
-                        if (ok)
+                        // v2.2.40: If everything was already config-paused (e.g., user paused
+                        // all folders via Web UI before network changed), nothing was flipped —
+                        // we have no snapshot to restore on auto-resume. Stamping
+                        // _autoPaused/_paused with an empty snapshot would let a subsequent
+                        // user-initiated MenuResume hit its empty-snapshot fallback ("unpause
+                        // everything") and silently unpause the user's intentional pauses.
+                        // Treat zero-flip as "nothing to do" and skip the state mutation.
+                        bool nothingToFlip = flippedFolders.Count == 0 && flippedDevices.Count == 0;
+                        if (ok && !nothingToFlip)
                         {
                             RunOnUi(() =>
                             {
@@ -1206,6 +1214,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
                                 BuildMenu();
                                 ShowOsd("Auto-paused: public network detected", 3000);
                             });
+                        }
+                        else if (ok)
+                        {
+                            // Nothing was active to pause — already config-paused. Don't claim
+                            // _autoPaused state (would trap user into the empty-snapshot
+                            // unwedge path on manual Resume).
+                            TrayLog.Info("Auto-pause: nothing to flip (everything already config-paused); skipping state mutation.");
                         }
                         else
                         {
@@ -1866,21 +1881,33 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 deviceLine = string.Join('|', _trayPausedDeviceIds);
             }
             var body = $"{_activePauseMinutes}\n{ticksLine}\n{autoLine}\n{PauseStateSchemaV3}\n{folderLine}\n{deviceLine}";
-            // v2.2.40: atomic write — write to .tmp, then File.Replace (or File.Move when
-            // no destination exists). A crash mid-write would otherwise truncate pause.dat
-            // and the next RestorePauseStateOnStartup would delete it, losing the snapshot.
+            // v2.2.40: atomic write — write to .tmp, then File.Replace with a `.bak`
+            // backup so AV-lock or in-place-replace failures still leave a recoverable
+            // copy of the prior pause.dat. Without the backup name, a Replace failure
+            // mid-operation could leave the destination deleted (the very scenario the
+            // atomic write was meant to prevent — Replace deletes-before-renames).
             var tempPath = _pauseStatePath + ".tmp";
+            var backupPath = _pauseStatePath + ".bak";
             File.WriteAllText(tempPath, body);
             if (File.Exists(_pauseStatePath))
-                File.Replace(tempPath, _pauseStatePath, destinationBackupFileName: null);
+                File.Replace(tempPath, _pauseStatePath, destinationBackupFileName: backupPath);
             else
                 File.Move(tempPath, _pauseStatePath);
+            // Best-effort cleanup of the backup on success — keeping it around forever
+            // would let stale state stick after several pause/resume cycles. The .bak
+            // is only useful between the failed-Replace moment and the next successful
+            // PersistPauseState, so dropping it after success is safe.
+            try { if (File.Exists(backupPath)) File.Delete(backupPath); } catch { }
         }
         catch (Exception ex)
         {
             TrayLog.Warn($"PersistPauseState: {ex.Message}");
             // Best-effort cleanup of orphan tmp on any failure path.
             try { var t = _pauseStatePath + ".tmp"; if (File.Exists(t)) File.Delete(t); } catch { }
+            // Recovery hint: if Replace failed mid-operation, .bak holds the pre-write
+            // snapshot. We don't auto-restore (could mask real corruption) but log it
+            // so support can recover by hand.
+            try { var b = _pauseStatePath + ".bak"; if (File.Exists(b)) TrayLog.Warn("PersistPauseState: .bak file exists at " + b + " — may contain recoverable prior state."); } catch { }
         }
     }
 
