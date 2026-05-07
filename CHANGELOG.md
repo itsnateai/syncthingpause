@@ -4,6 +4,14 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.3 — 2026-05-07
+
+### Bug fixes
+- **Pause/Resume label now actually flips after you click.** v2.3.0–v2.3.2's `BuildMenu` cached the menu and skipped rebuild when none of its tracked fields changed — but those fields don't include per-folder/per-device paused state. So when you clicked "Pause Folder" or "Pause Device", the PATCH succeeded, the in-memory cache was updated, but the menu rebuild was silently skipped — so the next time you opened the menu the label was still the pre-click state ("Pause Folder" instead of "Resume Folder", Resume still greyed instead of Pause). The toggle handlers now invalidate the menu-built flag explicitly before calling `BuildMenu()` so the rebuild always lands.
+
+### UX
+- **Synced Folders sub-submenus now show both Resume + Pause always**, with the no-op for current state greyed out — same pattern as the Devices submenu in v2.3.2. Folder pause state is now visible at a glance via which action is enabled, consistent with how Devices already works.
+
 ## v2.3.2 — 2026-05-07
 
 ### UX

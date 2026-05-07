@@ -792,8 +792,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (paused) subItem.Tag = PausedDimColor;
             subItem.DropDownItems.Add("Open Folder", null, (_, _) => OpenFolder(path));
             subItem.DropDownItems.Add("Rescan", null, (_, _) => MenuRescanFolder(folderId));
-            subItem.DropDownItems.Add(paused ? "Resume Folder" : "Pause Folder", null,
-                (_, _) => TogglePauseFolder(folderId, !paused));
+            // v2.3.3: show BOTH Resume and Pause always, grey the action that's a no-op
+            // for the current state. Mirrors the Devices submenu UX from v2.3.2 — the
+            // pause state is visible at a glance via which item is enabled.
+            var resumeFI = new ToolStripMenuItem("Resume Folder", null,
+                (_, _) => TogglePauseFolder(folderId, false));
+            resumeFI.Enabled = paused;
+            subItem.DropDownItems.Add(resumeFI);
+            var pauseFI = new ToolStripMenuItem("Pause Folder", null,
+                (_, _) => TogglePauseFolder(folderId, true));
+            pauseFI.Enabled = !paused;
+            subItem.DropDownItems.Add(pauseFI);
             folderItem.DropDownItems.Add(subItem);
         }
 
@@ -892,6 +901,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 _folders = _folders
                     .Select(f => f.Id == folderId ? f with { Paused = newPaused } : f)
                     .ToArray();
+                // v2.3.3: BuildMenu's cache key doesn't include per-folder paused
+                // state, so a folder-pause flip alone doesn't trip the change
+                // detector. Invalidate explicitly so the rebuild actually happens
+                // and the user sees the flipped label / dim / Resume-enabled state.
+                _menuBuilt = false;
                 BuildMenu();
                 var folder = _folders.FirstOrDefault(f => f.Id == folderId);
                 var label = folder?.Label ?? folderId;
@@ -942,6 +956,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 // next open. The 10s poll will reconcile if Syncthing's persisted
                 // state diverges (it shouldn't — PATCH 200 means cfg.Save() done).
                 _devicePaused[deviceId] = newPaused;
+                // v2.3.3: see TogglePauseFolder for why this is needed — BuildMenu's
+                // cache check doesn't track per-device pause state.
+                _menuBuilt = false;
                 BuildMenu();
                 var name = _deviceRoster.TryGetValue(deviceId, out var n) && n.Length > 0 ? n : ShortenDeviceId(deviceId);
                 ShowOsd($"{name}: {(newPaused ? "paused" : "resumed")}", 2500);
