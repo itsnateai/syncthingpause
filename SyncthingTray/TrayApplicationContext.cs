@@ -992,10 +992,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
             var deviceId = d.Id;
             var paused = d.Paused;
             var sub = new ToolStripMenuItem(MenuTextSanitizer.Sanitize(d.Name));
-            // Color: paused devices use the dim grey (intent over reachability — if
-            // the user paused it, that's the load-bearing state to surface). Otherwise
-            // green/red by connection. Mirrors Synced Folders header convention.
-            sub.Tag = paused ? PausedDimColor : (d.Connected ? HeaderOnlineColor : HeaderOfflineColor);
+            // v2.3.4: color by PAUSE state only — this submenu carries pause/resume
+            // actions, so color should match the actionable axis (paused vs active)
+            // not the connection axis (online vs offline). Conflating them produced
+            // "red device but Pause is enabled" cognitive dissonance — the device
+            // was offline (red) AND not paused (Pause enabled), which is correct
+            // Syncthing semantics but reads as a contradiction. Connection state
+            // still lives in the Synced Folders header coloring where its meaning
+            // is purely informational.
+            if (paused) sub.Tag = PausedDimColor;
             // v2.3.2: show BOTH Resume and Pause always, with the action that matches
             // the current state greyed out (no-op anyway). Lets you see device state
             // at a glance without opening the web UI; the available action is the

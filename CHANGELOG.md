@@ -4,6 +4,11 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.4 — 2026-05-07
+
+### UX
+- **Devices submenu color now reflects pause state, not connection state.** v2.3.0–v2.3.3 colored Devices entries red when offline / green when online — the same convention used (correctly) in Synced Folders headers. But the Devices submenu carries pause/resume *actions*, so a red entry with "Pause Device" still enabled looked contradictory ("you can't pause a red offline"). Now the color follows the actionable axis: dim grey when paused, normal text when active. Connection state still lives in the Synced Folders headers where the meaning is purely informational. (Pausing an offline device is still valid — it stops auto-reconnect when the peer comes back — and is now expressed only through the available action, not duplicated in the color.)
+
 ## v2.3.3 — 2026-05-07
 
 ### Bug fixes
