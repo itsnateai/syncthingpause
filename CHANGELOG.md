@@ -4,6 +4,11 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.1 — 2026-05-07
+
+### Bug fixes
+- **Device-name headers in Synced Folders are now actually colored.** v2.3.0 set the Tag color correctly but `ToolStripRenderer.OnRenderItemText` branches on `item.Enabled` and routes disabled items through `ControlPaint.DrawStringDisabled` — that path ignores `e.TextColor` and renders the system default embossed-grey instead. So the header items appeared as before (greyed). The renderer now bypasses the base call entirely when an item carries a `Tag = Color`, drawing directly with `TextRenderer.DrawText` so the green/red coloring lands on disabled headers exactly the same as it does on enabled items.
+
 ## v2.3.0 — 2026-05-07
 
 ### New features

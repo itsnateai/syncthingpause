@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Resources\sync.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.3.0</Version>
+    <Version>2.3.1</Version>
     <AssemblyName>SyncthingTray</AssemblyName>
     <RootNamespace>SyncthingTray</RootNamespace>
     <Nullable>enable</Nullable>
