@@ -1698,6 +1698,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 ShowOsd("Failed to pause syncing", 3000);
                 return;
             }
+            // v2.2.42: same empty-snapshot guard as auto-pause. If everything is
+            // already config-paused (e.g. user manually paused all folders via
+            // Syncthing web UI), MenuPause has nothing to flip — claiming _paused
+            // with an empty snapshot would trap the next MenuResume click into the
+            // "unpause everything paused" upgrade-unwedge fallback, silently
+            // un-pausing folders the user had intentionally paused. Show a clear
+            // OSD instead and leave state untouched.
+            if (flippedFolders.Count == 0 && flippedDevices.Count == 0)
+            {
+                ShowOsd("Already paused — nothing to do", 3000);
+                TrayLog.Info("MenuPause: nothing to flip (everything already config-paused); _paused not stamped to avoid empty-snapshot resume trap.");
+                return;
+            }
             RunOnUi(() =>
             {
                 if (_disposed) return;
@@ -1904,10 +1917,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
             TrayLog.Warn($"PersistPauseState: {ex.Message}");
             // Best-effort cleanup of orphan tmp on any failure path.
             try { var t = _pauseStatePath + ".tmp"; if (File.Exists(t)) File.Delete(t); } catch { }
-            // Recovery hint: if Replace failed mid-operation, .bak holds the pre-write
-            // snapshot. We don't auto-restore (could mask real corruption) but log it
-            // so support can recover by hand.
-            try { var b = _pauseStatePath + ".bak"; if (File.Exists(b)) TrayLog.Warn("PersistPauseState: .bak file exists at " + b + " — may contain recoverable prior state."); } catch { }
+            // Recovery hint: a .bak file may exist from a prior successful write whose
+            // post-Replace cleanup Delete failed (e.g., AV held it open). It does NOT
+            // contain pre-write state for THIS failure (.NET's File.Replace doesn't
+            // create the backup until the rename half completes). Log it so support
+            // can decide whether the .bak is worth recovering, but don't auto-restore.
+            try { var b = _pauseStatePath + ".bak"; if (File.Exists(b)) TrayLog.Warn("PersistPauseState: stale .bak file present at " + b + " (from a prior cycle whose cleanup failed; predates this failure)."); } catch { }
         }
     }
 

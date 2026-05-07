@@ -4,6 +4,14 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.2.42 — 2026-05-07
+
+### Bug fixes (post-v2.2.41 verifier round)
+- **MenuPause now bails when there's nothing to pause.** Symmetric with v2.2.40's auto-pause guard: if you click "Pause Syncing" while every folder + device is already paused-in-config (via Syncthing web UI), the tray showed "Syncing paused" but stamped `_paused=true` with an empty snapshot. A subsequent "Resume Syncing" click would then hit the empty-snapshot fallback ("unpause everything paused") and silently un-pause folders you had intentionally paused. MenuPause now shows "Already paused — nothing to do" and leaves state untouched.
+
+### Hardening
+- Reworded the post-failure `.bak` log line to reflect .NET's documented `File.Replace` behavior — the `.bak` is created during the rename half, not pre-write, so a `.bak` present after a Replace failure necessarily comes from a prior cycle whose cleanup didn't run, not from "this" failure. Avoids misleading support diagnostics.
+
 ## v2.2.41 — 2026-05-07
 
 ### Bug fixes (post-v2.2.40 verifier round)
