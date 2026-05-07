@@ -979,8 +979,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
             // the user paused it, that's the load-bearing state to surface). Otherwise
             // green/red by connection. Mirrors Synced Folders header convention.
             sub.Tag = paused ? PausedDimColor : (d.Connected ? HeaderOnlineColor : HeaderOfflineColor);
-            sub.DropDownItems.Add(paused ? "Resume Device" : "Pause Device", null,
-                (_, _) => TogglePauseDevice(deviceId, !paused));
+            // v2.3.2: show BOTH Resume and Pause always, with the action that matches
+            // the current state greyed out (no-op anyway). Lets you see device state
+            // at a glance without opening the web UI; the available action is the
+            // enabled one. Resume above Pause per the typical "exit-state-first" idiom
+            // (the "way out" of the current state is visually closer to the user's eye).
+            var resumeItem = new ToolStripMenuItem("Resume Device", null,
+                (_, _) => TogglePauseDevice(deviceId, false));
+            resumeItem.Enabled = paused;
+            sub.DropDownItems.Add(resumeItem);
+            var pauseItem = new ToolStripMenuItem("Pause Device", null,
+                (_, _) => TogglePauseDevice(deviceId, true));
+            pauseItem.Enabled = !paused;
+            sub.DropDownItems.Add(pauseItem);
             devItem.DropDownItems.Add(sub);
         }
     }

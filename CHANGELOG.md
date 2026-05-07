@@ -4,6 +4,11 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.2 — 2026-05-07
+
+### UX
+- **Devices submenu now shows both Resume and Pause for every device, always.** v2.3.0/v2.3.1 only showed the action matching the current state (Pause when active, Resume when paused). Now both items appear — the action that's a no-op for the device's current state is greyed out, so you can read pause state at a glance without opening the web UI, and the action you can take is the enabled one. Resume is on top, Pause below.
+
 ## v2.3.1 — 2026-05-07
 
 ### Bug fixes
