@@ -29,7 +29,14 @@ internal sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
-        e.TextColor = e.Item.Enabled ? MenuFg : Color.FromArgb(0x60, 0x60, 0x70);
+        // v2.3.0: items can opt into a custom text color by setting Item.Tag = Color.
+        // Used by the Synced Folders / Devices submenus to render device-name headers
+        // green when online and red when offline. Disabled state still applies dimming
+        // for non-tagged items.
+        if (e.Item.Tag is Color tagColor)
+            e.TextColor = tagColor;
+        else
+            e.TextColor = e.Item.Enabled ? MenuFg : Color.FromArgb(0x60, 0x60, 0x70);
         base.OnRenderItemText(e);
     }
 

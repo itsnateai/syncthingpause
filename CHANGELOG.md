@@ -4,6 +4,21 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.0 — 2026-05-07
+
+### New features
+- **Per-folder pause/resume.** Right-click → **Synced Folders** → expand any folder → **Pause Folder** / **Resume Folder**. Pauses the individual folder by writing its `paused` flag in Syncthing's config — fully persistent across daemon restart and reboot, no tray-side bookkeeping. Independent of the global "Pause Syncing" — pausing one folder does not flip the tray icon to paused state. The folder label is dimmed in the menu when paused, so you can spot which folders are off at a glance.
+- **Per-device pause/resume.** New top-level **Devices** submenu next to Synced Folders. Each remote device gets a sub-submenu with **Pause Device** / **Resume Device**. PATCHes the device's `paused` flag in Syncthing's config (same persistent semantics as folder pause). Self device is excluded — Syncthing has no notion of pausing the local machine.
+- **Device-name headers in Synced Folders are now color-coded.** Green when the device is currently connected, red when offline. Connection state refreshes every 10 seconds from the existing connections poll. Devices submenu items use the same color convention; paused devices override to a dim grey to surface intent over reachability. Implemented via a small extension to `DarkMenuRenderer` — items can opt into custom text colors by setting `Item.Tag = Color`.
+
+### Bug fixes
+- **Stop Syncthing now kills the entire process tree.** Syncthing v2 forks a supervisor + daemon process. The previous `Process.Kill()` fallback only killed one PID — supervisor-only kill orphaned the daemon, daemon-only kill let the supervisor restart it, and the user saw "still running" in the web UI after clicking Stop. Now uses `Process.Kill(entireProcessTree: true)` (.NET 5+) which terminates parent and all descendants atomically via Win32 Job Object semantics.
+
+### Internals
+- `FolderInfo` record gains a `Paused` field, populated from `/rest/config/folders` on every load.
+- `_devicePaused: Dictionary<string,bool>` cache populated free-of-charge from the existing 10s `/rest/system/connections` poll (which already returns per-device `paused`).
+- Per-folder/per-device pause is fully independent of the global pause snapshot+reapply machinery added in v2.2.39 — clicking "Pause Folder" doesn't trigger the global pause flow, and the global flow's snapshot only captures folders/devices it itself flipped, so individual user-managed pauses survive global pause/resume cycles unchanged.
+
 ## v2.2.42 — 2026-05-07
 
 ### Bug fixes (post-v2.2.41 verifier round)

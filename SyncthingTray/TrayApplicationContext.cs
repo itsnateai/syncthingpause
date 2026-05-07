@@ -29,6 +29,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private string _syncStatus = "unknown";
     private string _syncDetail = string.Empty;
     private readonly Dictionary<string, bool> _knownDevices = new();
+    // v2.3.0: per-device paused state, populated free-of-charge from each
+    // /rest/system/connections poll. Used by the Devices submenu and the Synced
+    // Folders header coloring. Updated under the same UI/poll thread contract as
+    // _knownDevices (UI thread reads in BuildMenu; pool thread writes on poll-tick).
+    private readonly Dictionary<string, bool> _devicePaused = new();
     private bool _devicesPollSeeded;
     private int _lastConflictCount;
     private bool _deviceApiFailureNotified;
@@ -159,6 +164,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     // Pre-computed constant strings (avoid repeated interpolation)
     private static readonly string TitleString = $"SyncthingTray v{AppConfig.Version}";
+
+    // v2.3.0 menu coloring (Catppuccin-Mocha-aligned, readable on the dark bg).
+    // Applied via Item.Tag = Color, honored by DarkMenuRenderer.OnRenderItemText.
+    private static readonly Color HeaderOnlineColor = Color.FromArgb(0xA6, 0xE3, 0xA1);
+    private static readonly Color HeaderOfflineColor = Color.FromArgb(0xF3, 0x8B, 0xA8);
+    private static readonly Color PausedDimColor = Color.FromArgb(0x80, 0x80, 0x90);
 
     // Cached tooltip state — only rebuild string when components change
     private string _lastTipStatus = string.Empty;
@@ -579,6 +590,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
             menu.Items.Add(folderItem);
         }
 
+        // v2.3.0: per-device pause/resume submenu. Self device is excluded — there's
+        // no semantic for "pause the local machine in its own roster". Skipped entirely
+        // when the device roster is empty (shows up before first /rest/config/devices
+        // success).
+        if (_deviceRoster.Count > 0)
+        {
+            var devItem = new ToolStripMenuItem("Devices");
+            BuildDevicesMenu(devItem);
+            if (devItem.DropDownItems.Count > 0)
+                menu.Items.Add(devItem);
+        }
+
         // Rescan Now
         if (running && !string.IsNullOrEmpty(_config.ApiKey))
             menu.Items.Add("Force Rescan Now", null, (_, _) => MenuRescanAll());
@@ -722,6 +745,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // deviceName -> folders shared with that device (dups across headers are
         // expected for multi-device folders).
         var byDevice = new Dictionary<string, List<FolderInfo>>(StringComparer.Ordinal);
+        // v2.3.0: deviceName -> deviceId so the header can look up connection
+        // status from _knownDevices for green/red coloring. First-seen-wins on
+        // pathological name collisions (Syncthing usually keeps device names
+        // unique — collisions are user-induced).
+        var nameToId = new Dictionary<string, string>(StringComparer.Ordinal);
         var localOnly = new List<FolderInfo>();
 
         foreach (var f in _folders)
@@ -741,7 +769,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     ? n
                     : ShortenDeviceId(id);
                 if (!byDevice.TryGetValue(name, out var list))
+                {
                     byDevice[name] = list = new List<FolderInfo>();
+                    nameToId[name] = id;
+                }
                 list.Add(f);
             }
         }
@@ -754,9 +785,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             var path = f.Path;
             var folderId = f.Id;
+            var paused = f.Paused;
             var subItem = new ToolStripMenuItem(MenuTextSanitizer.Sanitize(f.Label));
+            // v2.3.0: dim paused folder labels so the user can spot at a glance which
+            // folders aren't syncing without expanding each submenu.
+            if (paused) subItem.Tag = PausedDimColor;
             subItem.DropDownItems.Add("Open Folder", null, (_, _) => OpenFolder(path));
             subItem.DropDownItems.Add("Rescan", null, (_, _) => MenuRescanFolder(folderId));
+            subItem.DropDownItems.Add(paused ? "Resume Folder" : "Pause Folder", null,
+                (_, _) => TogglePauseFolder(folderId, !paused));
             folderItem.DropDownItems.Add(subItem);
         }
 
@@ -765,7 +802,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             if (!firstGroup) folderItem.DropDownItems.Add(new ToolStripSeparator());
             firstGroup = false;
-            folderItem.DropDownItems.Add(new ToolStripMenuItem(MenuTextSanitizer.Sanitize(deviceName)) { Enabled = false });
+            // v2.3.0: color the device-name header based on connection state.
+            // Green when /rest/system/connections reports connected=true; red
+            // otherwise. The header is still Enabled=false (no click action).
+            var headerColor = HeaderOfflineColor;
+            if (nameToId.TryGetValue(deviceName, out var deviceId)
+                && _knownDevices.TryGetValue(deviceId, out var connected)
+                && connected)
+            {
+                headerColor = HeaderOnlineColor;
+            }
+            folderItem.DropDownItems.Add(new ToolStripMenuItem(MenuTextSanitizer.Sanitize(deviceName))
+            {
+                Enabled = false,
+                Tag = headerColor,
+            });
             foreach (var f in byDevice[deviceName].OrderBy(x => x.Label, StringComparer.CurrentCultureIgnoreCase))
                 EmitFolder(f);
         }
@@ -791,6 +842,147 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 catch (Exception ex) { TrayLog.Warn("Refresh List LoadFolders faulted: " + ex.Message); }
             });
         });
+    }
+
+    /// <summary>
+    /// v2.3.0 — toggle a single folder's config-level paused state. PATCHes
+    /// /rest/config/folders/&lt;id&gt; with {"paused":bool}. Persistent across daemon
+    /// restart and reboot (lives in Syncthing's config). Idempotent server-side.
+    /// Updates _folders cache + rebuilds menu on success so the label flips
+    /// immediately without waiting for the next poll. Failure surfaces an OSD.
+    ///
+    /// Independent from the global pause snapshot — does NOT touch _paused,
+    /// _pauseNeedsReapply, or pause.dat. Per-folder pauses survive reboots
+    /// because Syncthing persists `paused` in config (no tray-side bookkeeping).
+    /// </summary>
+    private void TogglePauseFolder(string folderId, bool newPaused)
+    {
+        if (string.IsNullOrEmpty(folderId)) return;
+        if (string.IsNullOrEmpty(_config.ApiKey))
+        {
+            ShowOsd("API Key required — set in Settings", 3000);
+            return;
+        }
+        _ = Task.Run(() =>
+        {
+            int status;
+            try
+            {
+                string body = newPaused ? "{\"paused\":true}" : "{\"paused\":false}";
+                status = _api.Patch($"/rest/config/folders/{Uri.EscapeDataString(folderId)}", body).StatusCode;
+            }
+            catch (Exception ex)
+            {
+                TrayLog.Warn($"TogglePauseFolder {folderId}: {ex.Message}");
+                ShowOsd("Folder pause/resume failed", 3000);
+                return;
+            }
+            if (status != 200)
+            {
+                ShowOsd($"Folder pause/resume failed (HTTP {status})", 3000);
+                return;
+            }
+            // Update cache + rebuild menu on UI thread so the next open shows the
+            // flipped Pause/Resume label without waiting for the 10s poll. The
+            // _folders array is replaced rather than mutated in place — same
+            // publication contract as LoadFolders' assignment.
+            RunOnUi(() =>
+            {
+                if (_disposed) return;
+                _folders = _folders
+                    .Select(f => f.Id == folderId ? f with { Paused = newPaused } : f)
+                    .ToArray();
+                BuildMenu();
+                var folder = _folders.FirstOrDefault(f => f.Id == folderId);
+                var label = folder?.Label ?? folderId;
+                ShowOsd($"{label}: {(newPaused ? "paused" : "resumed")}", 2500);
+                TrayLog.Info($"TogglePauseFolder: {folderId} -> paused={newPaused}.");
+            });
+        });
+    }
+
+    /// <summary>
+    /// v2.3.0 — toggle a single device's config-level paused state. PATCHes
+    /// /rest/config/devices/&lt;id&gt; with {"paused":bool}. Same contract as
+    /// TogglePauseFolder. The visible label refresh comes from the next poll's
+    /// /rest/system/connections (which carries per-device paused) — no manual
+    /// cache update needed; just BuildMenu and OSD here.
+    /// </summary>
+    private void TogglePauseDevice(string deviceId, bool newPaused)
+    {
+        if (string.IsNullOrEmpty(deviceId)) return;
+        if (string.IsNullOrEmpty(_config.ApiKey))
+        {
+            ShowOsd("API Key required — set in Settings", 3000);
+            return;
+        }
+        _ = Task.Run(() =>
+        {
+            int status;
+            try
+            {
+                string body = newPaused ? "{\"paused\":true}" : "{\"paused\":false}";
+                status = _api.Patch($"/rest/config/devices/{Uri.EscapeDataString(deviceId)}", body).StatusCode;
+            }
+            catch (Exception ex)
+            {
+                TrayLog.Warn($"TogglePauseDevice {deviceId}: {ex.Message}");
+                ShowOsd("Device pause/resume failed", 3000);
+                return;
+            }
+            if (status != 200)
+            {
+                ShowOsd($"Device pause/resume failed (HTTP {status})", 3000);
+                return;
+            }
+            RunOnUi(() =>
+            {
+                if (_disposed) return;
+                // Optimistically update _devicePaused so the menu label flips on
+                // next open. The 10s poll will reconcile if Syncthing's persisted
+                // state diverges (it shouldn't — PATCH 200 means cfg.Save() done).
+                _devicePaused[deviceId] = newPaused;
+                BuildMenu();
+                var name = _deviceRoster.TryGetValue(deviceId, out var n) && n.Length > 0 ? n : ShortenDeviceId(deviceId);
+                ShowOsd($"{name}: {(newPaused ? "paused" : "resumed")}", 2500);
+                TrayLog.Info($"TogglePauseDevice: {deviceId} -> paused={newPaused}.");
+            });
+        });
+    }
+
+    /// <summary>
+    /// v2.3.0 — builds the Devices submenu. Each remote device shows as a sub-submenu
+    /// with a state-aware Pause/Resume entry. Header text is colored by connection
+    /// status (green=connected, red=disconnected) and dimmed when paused. Self device
+    /// is excluded — Syncthing has no semantic for pausing the local machine.
+    /// </summary>
+    private void BuildDevicesMenu(ToolStripMenuItem devItem)
+    {
+        var entries = _deviceRoster
+            .Where(kv => kv.Key.Length > 0 && kv.Key != _myDeviceId)
+            .Select(kv => new
+            {
+                Id = kv.Key,
+                Name = kv.Value.Length > 0 ? kv.Value : ShortenDeviceId(kv.Key),
+                Connected = _knownDevices.TryGetValue(kv.Key, out var c) && c,
+                Paused = _devicePaused.TryGetValue(kv.Key, out var p) && p,
+            })
+            .OrderBy(e => e.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+        foreach (var d in entries)
+        {
+            var deviceId = d.Id;
+            var paused = d.Paused;
+            var sub = new ToolStripMenuItem(MenuTextSanitizer.Sanitize(d.Name));
+            // Color: paused devices use the dim grey (intent over reachability — if
+            // the user paused it, that's the load-bearing state to surface). Otherwise
+            // green/red by connection. Mirrors Synced Folders header convention.
+            sub.Tag = paused ? PausedDimColor : (d.Connected ? HeaderOnlineColor : HeaderOfflineColor);
+            sub.DropDownItems.Add(paused ? "Resume Device" : "Pause Device", null,
+                (_, _) => TogglePauseDevice(deviceId, !paused));
+            devItem.DropDownItems.Add(sub);
+        }
     }
 
     // --- Polling ---
@@ -1015,6 +1207,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
                             }
                         }
                         _knownDevices[deviceId] = connected;
+                        // v2.3.0: track per-device paused state for the Devices submenu's
+                        // Pause/Resume label. Free piggyback on this poll — no extra HTTP.
+                        _devicePaused[deviceId] = paused;
                     }
                     _devicesPollSeeded = true;
                     _connectedCount = connCount;
@@ -1082,6 +1277,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     var seenDevices = new HashSet<string>(connections.EnumerateObject().Select(p => p.Name));
                     foreach (var id in _knownDevices.Keys.Where(k => !seenDevices.Contains(k)).ToList())
                         _knownDevices.Remove(id);
+                    foreach (var id in _devicePaused.Keys.Where(k => !seenDevices.Contains(k)).ToList())
+                        _devicePaused.Remove(id);
                 }
             }
             else
@@ -1480,9 +1677,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
                             }
                         }
 
+                        // v2.3.0: read folder.paused so the per-folder Pause/Resume submenu
+                        // entry can render the right state-aware label without an extra GET.
+                        bool fPaused = folder.TryGetProperty("paused", out var pEl) && pEl.ValueKind == JsonValueKind.True;
+
                         string displayName = fLabel.Length > 0 ? fLabel : fId;
                         if (fPath.Length > 0)
-                            list.Add(new FolderInfo(fId, displayName, fPath, deviceIds.ToArray()));
+                            list.Add(new FolderInfo(fId, displayName, fPath, deviceIds.ToArray(), fPaused));
                     }
                     _folders = list.ToArray();
 
@@ -2444,25 +2645,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
             catch { /* fall through to force kill */ }
         }
 
-        // Force kill fallback — target our launched PID first
+        // Force kill fallback — target our launched PID first.
+        // v2.3.0: Kill(entireProcessTree:true) is required for Syncthing v2's
+        // supervisor+daemon fork model. Killing the supervisor alone leaves the
+        // daemon orphaned; killing the daemon alone lets the supervisor restart
+        // it. .NET 5+'s entireProcessTree variant terminates the parent and ALL
+        // descendants atomically (Win32 Job Object semantics under the hood).
         if (_launchedPid != 0)
         {
             try
             {
                 using var p = Process.GetProcessById(_launchedPid);
-                p.Kill();
+                p.Kill(entireProcessTree: true);
             }
             catch { /* already gone or wrong PID */ }
             _launchedPid = 0;
         }
         else
         {
-            // No tracked PID — fall back to killing by name
+            // No tracked PID — fall back to killing by name. Take the process tree
+            // for each match: any supervisor we hit will drop its child too.
             foreach (var p in Process.GetProcessesByName("syncthing"))
             {
                 using (p)
                 {
-                    try { p.Kill(); } catch { /* already gone */ }
+                    try { p.Kill(entireProcessTree: true); } catch { /* already gone */ }
                 }
             }
         }
@@ -2725,5 +2932,5 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     // --- Data types ---
 
-    private sealed record FolderInfo(string Id, string Label, string Path, string[] DeviceIds);
+    private sealed record FolderInfo(string Id, string Label, string Path, string[] DeviceIds, bool Paused);
 }
