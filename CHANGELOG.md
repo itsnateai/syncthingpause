@@ -4,6 +4,16 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.11 — 2026-05-07
+
+### New
+- **Tray icon now appears in the taskbar by default on Windows 11.** Previously, every fresh install (or every WinGet upgrade that landed in a new versioned dir) defaulted to hidden-in-overflow until the user manually toggled "Show icon in taskbar" under Settings → Personalization → Taskbar → Other system tray icons. SyncthingTray now writes the per-icon `IsPromoted=1` flag automatically, so the icon is visible from first launch. If you previously hid it deliberately (`IsPromoted=0`), that choice is respected — we only promote when the value is missing or already 1.
+- **Cleanup of stale tray-icon entries from prior versions.** Each WinGet upgrade and each .NET single-file extraction left behind a registry subkey under `HKCU\Control Panel\NotifyIconSettings` pointing to a now-deleted install path; over time these accumulated as duplicate "SyncthingTray" entries in the Settings list. On first launch of v2.3.11, any subkey whose `ExecutablePath` basename matches our exe AND points to a path that no longer exists is reaped. Conservative — never touches sparse/orphan subkeys, never touches other apps' subkeys, never touches your currently-running install.
+
+### Notes
+- These changes are no-ops on Windows 10 and Server SKUs (the `NotifyIconSettings` registry schema is Win11 22H2+ only). The build-version guard short-circuits before any registry access.
+- All registry interaction is wrapped in try/catch and goes through `tray.log` (opt-in via `DiagnosticLogging=1` in `SyncthingTray.ini`). A schema change in a future Windows build silently no-ops rather than crashing the tray.
+
 ## v2.3.10 — 2026-05-07
 
 ### Bug fixes (v2.3.9 verifier round — 3 convergent gaps closed)

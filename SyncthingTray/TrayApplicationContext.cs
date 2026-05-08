@@ -227,6 +227,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _osd = new OsdToolTip();
 
+        // Win11 tray-icon hygiene. Snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md.
+        // Sweep first (zombies from prior versioned WinGet installs / single-file extraction caches),
+        // then capture the baseline so Phase-2 orphan claim has a "before NIM_ADD" reference.
+        TrayIconPromoter.SweepStaleEntries(
+            ourExeName: Path.GetFileName(Application.ExecutablePath),
+            currentExePath: Application.ExecutablePath);
+        var trayBaseline = TrayIconPromoter.CaptureBaseline();
+
         _trayIcon = new NotifyIcon
         {
             Icon = _syncIcon,
@@ -235,6 +243,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
         _trayIcon.DoubleClick += OnTrayDoubleClick;
         _trayIcon.MouseUp += OnTrayMouseUp;
+
+        // Promote our subkey to visible-in-taskbar (vs hidden-in-overflow). Ticks
+        // for up to 10 s while Explorer populates the schema, then self-disposes.
+        StartTrayIconPromotion(trayBaseline);
 
         _messageWindow = new MessageWindow(this);
 
@@ -3406,6 +3418,50 @@ internal sealed class TrayApplicationContext : ApplicationContext
         base.Dispose(disposing);
     }
 
+    // --- TrayIconPromoter plumbing (snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md) ---
+
+    /// <summary>
+    /// Drive the promoter's retry timer until our subkey is identified or the
+    /// 10 s budget elapses. Idempotent — Phase 1 no-ops once IsPromoted=1.
+    /// Registered with _oneShotTimers so a fast-exit (&lt; 10 s) doesn't leak
+    /// the native timer handle.
+    /// </summary>
+    private void StartTrayIconPromotion(HashSet<string>? baseline)
+    {
+        var promoteTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        _oneShotTimers.Add(promoteTimer);
+        int attempts = 0;
+        const int maxAttempts = 20;   // 500 ms × 20 = 10 s cap
+        promoteTimer.Tick += (_, _) =>
+        {
+            attempts++;
+            bool done = TrayIconPromoter.TryPromote(Application.ExecutablePath, baseline)
+                        || attempts >= maxAttempts;
+            if (done)
+            {
+                promoteTimer.Stop();
+                _oneShotTimers.Remove(promoteTimer);
+                promoteTimer.Dispose();
+            }
+        };
+        promoteTimer.Start();
+    }
+
+    /// <summary>
+    /// Called from MessageWindow.WndProc on the TaskbarCreated broadcast.
+    /// Capture a fresh baseline first — Explorer's per-icon registry cache
+    /// got nuked by the restart, so subkeys may transit through the orphan
+    /// state again. Then re-show + re-promote.
+    /// </summary>
+    private void OnTaskbarCreated()
+    {
+        var recoveryBaseline = TrayIconPromoter.CaptureBaseline();
+        _trayIcon.Visible = true;
+        _firstIconPoll = true;
+        UpdateTrayIcon();
+        StartTrayIconPromotion(recoveryBaseline);
+    }
+
     // --- MessageWindow: hidden form for WndProc (TaskbarCreated recovery) ---
 
     private sealed class MessageWindow : Form
@@ -3428,10 +3484,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             if (_wmTaskbarCreated != 0 && (uint)m.Msg == _wmTaskbarCreated)
             {
-                // Explorer restarted — re-show tray icon and force icon re-assignment
-                _owner._trayIcon.Visible = true;
-                _owner._firstIconPoll = true;
-                _owner.UpdateTrayIcon();
+                // Explorer restarted — re-show tray icon, force icon re-assignment,
+                // and re-promote so we don't get exiled to overflow.
+                _owner.OnTaskbarCreated();
             }
             base.WndProc(ref m);
         }
