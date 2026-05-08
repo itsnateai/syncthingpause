@@ -4,6 +4,15 @@
 
 All notable changes to SyncthingTray are documented here.
 
+## v2.3.7 — 2026-05-07
+
+### Bug fixes
+- **`pause.dat` no longer triggers Syncthing "file not found" failed-items.** The pause-state sidecar used to live next to the .exe at `<install>\pause.dat`. If the install directory was itself a Syncthing-synced folder (e.g. `proggy\Tools\synctray\` shared between machines), every pause/resume cycle wrote+deleted the file inside that folder, and Syncthing's hashing pipeline raced the rapid create→delete and surfaced "open …pause.dat: The system cannot find the file specified" in failed items. Per-machine tray state has no business inside a synced folder anyway — now lives at `%LOCALAPPDATA%\SyncthingTray\pause.dat` (alongside `tray.log`). One-time migration on startup moves any legacy `pause.dat` from the install dir to the new location and cleans up stale `pause.dat.tmp`/`.bak` siblings. **No `.stignore` change required.**
+- **Tray icon now updates immediately when you pause/resume the last individual folder or device.** The `_lastPaused*Count` cache invalidation lived on the iconTimer's 5-second poll, so a click that flipped the partial→full or full→partial transition wouldn't update the icon for up to 5 seconds. `TogglePauseFolder` and `TogglePauseDevice` now call `UpdateTrayIcon()` directly after the cache mutation so the partial.ico ↔ pause.ico ↔ sync.ico transitions are instant.
+
+### New
+- **"Resume All Folders" menu item** — appears in the main right-click menu just above the localhost link, but only when at least one folder is currently paused. One click resumes every paused folder; devices you intentionally paused are left alone (folder-only flip).
+
 ## v2.3.6 — 2026-05-07
 
 ### New

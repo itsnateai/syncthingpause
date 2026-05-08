@@ -250,7 +250,46 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // absolute UTC deadline so wake-from-sleep doesn't drift the resume time.
         _pauseTimer = new System.Windows.Forms.Timer();
         _pauseTimer.Tick += OnPauseTimerTick;
-        _pauseStatePath = Path.Combine(appDir, "pause.dat");
+        // v2.3.7: pause.dat moved out of appDir into %LOCALAPPDATA%\SyncthingTray\.
+        // Old location was a real bug for users whose install dir is itself a
+        // Syncthing folder — every PersistPauseState/DeletePauseStateFile cycle
+        // triggered Syncthing to sync the create+delete, and the hashing race
+        // produced "file not found" failed-items in the web UI. Per-machine
+        // tray state has no business being inside a synced folder regardless.
+        // tray.log already lives in this directory; just colocate.
+        var stateDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SyncthingTray");
+        try { Directory.CreateDirectory(stateDir); }
+        catch (Exception ex) { TrayLog.Warn($"Could not create state dir {stateDir}: {ex.Message}"); }
+        _pauseStatePath = Path.Combine(stateDir, "pause.dat");
+        // Migrate any leftover pause.dat from the legacy appDir location. If both
+        // exist, prefer the new path (newer state) and just delete the legacy file
+        // — leaving it behind would let Syncthing keep trying to sync it forever.
+        try
+        {
+            var legacyPath = Path.Combine(appDir, "pause.dat");
+            if (File.Exists(legacyPath))
+            {
+                if (!File.Exists(_pauseStatePath))
+                {
+                    File.Move(legacyPath, _pauseStatePath);
+                    TrayLog.Info($"pause.dat: migrated {legacyPath} -> {_pauseStatePath}.");
+                }
+                else
+                {
+                    File.Delete(legacyPath);
+                    TrayLog.Info($"pause.dat: deleted legacy file at {legacyPath} (newer state already present at {_pauseStatePath}).");
+                }
+            }
+            // Also clean up any leftover .tmp / .bak from the old location.
+            foreach (var stale in new[] { Path.Combine(appDir, "pause.dat.tmp"), Path.Combine(appDir, "pause.dat.bak") })
+                if (File.Exists(stale)) try { File.Delete(stale); } catch { }
+        }
+        catch (Exception ex)
+        {
+            TrayLog.Warn($"pause.dat legacy-path migration: {ex.Message}");
+        }
         RestorePauseStateOnStartup();
 
         // Startup delay — use a timer so the message pump stays alive
@@ -625,6 +664,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
             : "Stopped";
         var statusItem = menu.Items.Add($"Syncthing: {statusText}");
         statusItem.Enabled = false;
+        // v2.3.7: quick "Resume All Folders" action for users who paused several
+        // folders individually. Only shown when at least one folder is paused
+        // (no point cluttering the menu when there's nothing to resume).
+        bool anyFolderPaused = _folders.Any(f => f.Paused);
+        if (anyFolderPaused && !string.IsNullOrEmpty(_config.ApiKey))
+            menu.Items.Add("Resume All Folders", null, (_, _) => MenuResumeAllFolders());
         menu.Items.Add(_config.WebUI, null, (_, _) => OpenWebUI());
 
         // Synced Folders submenu — grouped by device prefix. Any label prefix (first
@@ -956,10 +1001,70 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 // and the user sees the flipped label / dim / Resume-enabled state.
                 _menuBuilt = false;
                 BuildMenu();
+                // v2.3.7: also refresh the tray icon — pausing the last active
+                // folder should flip the icon from partial.ico to pause.ico
+                // immediately, not 5s later when the iconTimer next fires.
+                UpdateTrayIcon();
                 var folder = _folders.FirstOrDefault(f => f.Id == folderId);
                 var label = folder?.Label ?? folderId;
                 ShowOsd($"{label}: {(newPaused ? "paused" : "resumed")}", 2500);
                 TrayLog.Info($"TogglePauseFolder: {folderId} -> paused={newPaused}.");
+            });
+        });
+    }
+
+    /// <summary>
+    /// v2.3.7 — resume every currently-paused folder in one shot. Reuses the
+    /// global pause helper with a folder-only filter (empty device set so device
+    /// pauses are left alone). Useful when the user has individually paused a
+    /// bunch of folders and wants one click to lift all of them. Devices the
+    /// user paused intentionally stay paused.
+    /// </summary>
+    private void MenuResumeAllFolders()
+    {
+        if (string.IsNullOrEmpty(_config.ApiKey))
+        {
+            ShowOsd("API Key required — set in Settings", 3000);
+            return;
+        }
+        var pausedIds = _folders.Where(f => f.Paused).Select(f => f.Id).ToList();
+        if (pausedIds.Count == 0)
+        {
+            ShowOsd("No paused folders to resume", 2500);
+            return;
+        }
+        _ = Task.Run(() =>
+        {
+            // Folder-only flip: pass an empty device filter so device-pause state
+            // is untouched. Folder filter scoped to the IDs that are actually
+            // paused (skip already-active folders — ApplyConfigPause's no-op
+            // skip would handle this anyway, but the explicit filter makes the
+            // intent obvious in the log line).
+            var folderFilter = new HashSet<string>(pausedIds, StringComparer.Ordinal);
+            var deviceFilter = new HashSet<string>(StringComparer.Ordinal); // empty = touch nothing
+            var (flippedFolders, _, ok) = ApplyConfigPause(
+                targetPaused: false,
+                folderIdFilter: folderFilter,
+                deviceIdFilter: deviceFilter);
+            if (!ok)
+            {
+                ShowOsd("Resume All Folders failed", 3000);
+                return;
+            }
+            RunOnUi(() =>
+            {
+                if (_disposed) return;
+                // Reflect the flip in the local cache so the menu/icon updates
+                // before the next /rest/config/folders poll.
+                var flipped = new HashSet<string>(flippedFolders, StringComparer.Ordinal);
+                _folders = _folders
+                    .Select(f => flipped.Contains(f.Id) ? f with { Paused = false } : f)
+                    .ToArray();
+                _menuBuilt = false;
+                BuildMenu();
+                UpdateTrayIcon();
+                ShowOsd($"Resumed {flippedFolders.Count} folder(s)", 2500);
+                TrayLog.Info($"MenuResumeAllFolders: flipped {flippedFolders.Count} folder(s) to paused=false.");
             });
         });
     }
@@ -1017,6 +1122,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 // cache check doesn't track per-device pause state.
                 _menuBuilt = false;
                 BuildMenu();
+                // v2.3.7: refresh tray icon immediately (mirrors fix in TogglePauseFolder).
+                UpdateTrayIcon();
                 var name = _deviceRoster.TryGetValue(deviceId, out var n) && n.Length > 0 ? n : ShortenDeviceId(deviceId);
                 ShowOsd($"{name}: {(newPaused ? "paused" : "resumed")}", 2500);
                 TrayLog.Info($"TogglePauseDevice: {deviceId} -> paused={newPaused}.");
