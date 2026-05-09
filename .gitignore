@@ -58,3 +58,6 @@ PR_NOTES.md
 MERGE_NOTES.md
 CRASH_REPORT_*.md
 IMPLEMENTATION_PROMPT*.md
+
+# WinGet manifest staging (wingetcreate.exe + per-version manifests; regeneratable per release)
+_winget-staging/
