@@ -8,9 +8,9 @@ A lightweight Windows tray companion for [Syncthing](https://syncthing.net/), bu
 
 ## Screenshots
 
-| Tray Menu | Settings | Taskbar |
-|:---------:|:--------:|:-------:|
-| ![Menu](screenshots/synctraymenu.png) | ![Settings](screenshots/synctraysettings.png) | ![Taskbar](screenshots/synctraytaskbaricon.png) |
+| Tray Menu | Settings |
+|:---------:|:--------:|
+| ![Menu](screenshots/synctraymenu.png) | ![Settings](screenshots/synctraysettings.png) |
 
 ## Features
 
