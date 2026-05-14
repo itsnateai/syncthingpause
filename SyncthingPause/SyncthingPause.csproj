@@ -6,13 +6,21 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Resources\sync.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>3.0.0</Version>
+    <Version>3.0.1</Version>
     <AssemblyName>SyncthingPause</AssemblyName>
     <RootNamespace>SyncthingPause</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- DPI: aligns the source-generated ApplicationConfiguration.Initialize() with
+         what app.manifest declares. Without this, the manifest claims PerMonitorV2
+         but the generated initializer defaults to SystemAware — WinForms scaling
+         math then disagrees with the OS on 125%/150% displays, producing clipped
+         buttons + smushed NumericUpDown (reported 2026-05-14, 125% Win11 laptop). -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>
   </PropertyGroup>
 
   <!-- Publish profile for the single-exe release. Embeds native runtime DLLs so

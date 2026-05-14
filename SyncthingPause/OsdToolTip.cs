@@ -28,6 +28,12 @@ internal sealed class OsdToolTip : Form
         AutoSize = false;
         Opacity = 0.95;
         Padding = new Padding(1);
+        // Pin design baseline to 96 DPI BEFORE AutoScaleMode so the OSD's
+        // hardcoded Label Location/MaximumSize literals (8,6 and 400,0 below)
+        // are always interpreted at 96 DPI regardless of monitor scale.
+        // Matches the pattern in SettingsForm/HelpForm/UpdateDialog.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         _labelFont = new Font("Segoe UI", 9f);
         _label = new Label

@@ -63,6 +63,10 @@ internal sealed class UpdateDialog : Form
         BackColor = BgColor;
         ForeColor = FgColor;
         ShowInTaskbar = false;
+        // Pin design baseline to 96 DPI BEFORE AutoScaleMode so literal Size/Point
+        // values below are always interpreted at 96 DPI regardless of which monitor
+        // the dialog is realized on. See SettingsForm.cs for the full rationale.
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
         _boldFont = new Font("Segoe UI", 9.5f, FontStyle.Bold);
@@ -688,6 +692,12 @@ internal sealed class UpdateDialog : Form
             AutoSize = true;
             AutoSizeMode = AutoSizeMode.GrowAndShrink;
             Padding = new Padding(12, 8, 12, 8);
+            // Pin design baseline to 96 DPI BEFORE AutoScaleMode so the hardcoded
+            // 20px screen-corner offset (set in Load handler below) and the
+            // Padding(12, 8, 12, 8) literals scale correctly at non-100% DPI.
+            // Matches the pattern in SettingsForm/HelpForm/UpdateDialog/OsdToolTip.
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
 
             _font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             var lbl = new Label

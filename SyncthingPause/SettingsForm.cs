@@ -85,6 +85,14 @@ internal sealed class SettingsForm : Form
         TopMost = true;
         BackColor = BgColor;
         ShowInTaskbar = false;
+        // Pin the design baseline to 96 DPI BEFORE setting AutoScaleMode so that
+        // every literal `new Size(_, _)` / `new Point(_, _)` below is always
+        // interpreted as 96-DPI design pixels — regardless of which monitor the
+        // form is first realized on. Without this, AutoScaleDimensions defaults
+        // to whatever the form's first monitor reports, and on 125%/150% laptops
+        // the form gets double-scaled (once by us, once by WinForms) which clips
+        // buttons + NumericUpDown.
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
         int sw = 410;
@@ -163,7 +171,12 @@ internal sealed class SettingsForm : Form
         _nudDelay = new NumericUpDown
         {
             Location = new Point(160, y - 2),
-            Width = 60,
+            // Width=60 worked at 100% DPI but clipped digits at 125% — NumericUpDown's
+            // spinner band scales independently of the parent at non-100% scale (well-
+            // known WinForms quirk), eating ~25px and leaving no room for 4-digit values.
+            // MinimumSize is the floor AutoScaleMode.Dpi won't shrink past.
+            Width = 80,
+            MinimumSize = new Size(80, 26),
             Minimum = 0,
             Maximum = 3600,
             Increment = 5,
@@ -176,7 +189,7 @@ internal sealed class SettingsForm : Form
             AccessibleName = "Windows startup delay in seconds",
         };
         Controls.Add(_nudDelay);
-        AddLabel("seconds", 228, y, 0, _normalFont, DimColor);
+        AddLabel("seconds", 248, y, 0, _normalFont, DimColor);
         y += 30;
     }
 
@@ -191,7 +204,7 @@ internal sealed class SettingsForm : Form
             Text = "...",
             Font = _btnFont,
             Location = new Point(314, y - 3),
-            Size = new Size(50, 24),
+            Size = new Size(50, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -208,7 +221,7 @@ internal sealed class SettingsForm : Form
             Text = "Open",
             Font = _btnFont,
             Location = new Point(314, y - 3),
-            Size = new Size(50, 24),
+            Size = new Size(50, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -254,7 +267,7 @@ internal sealed class SettingsForm : Form
             Text = "\uE7B3",
             Font = _iconFont,
             Location = new Point(310, y - 2),
-            Size = new Size(52, 22),
+            Size = new Size(52, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = EditBgColor,
@@ -445,7 +458,7 @@ internal sealed class SettingsForm : Form
             Text = "Check Now",
             Font = _btnFont,
             Location = new Point(240, y - 2),
-            Size = new Size(90, 22),
+            Size = new Size(90, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -525,7 +538,7 @@ internal sealed class SettingsForm : Form
             Text = "Update",
             Font = _btnFont,
             Location = new Point(90, y),
-            Size = new Size(58, 24),
+            Size = new Size(58, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -544,7 +557,7 @@ internal sealed class SettingsForm : Form
             Text = "Help",
             Font = _btnFont,
             Location = new Point(228, y),
-            Size = new Size(58, 24),
+            Size = new Size(58, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -561,7 +574,7 @@ internal sealed class SettingsForm : Form
             Text = "Check Config",
             Font = _btnFont,
             Location = new Point(294, y),
-            Size = new Size(100, 24),
+            Size = new Size(100, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -903,7 +916,13 @@ internal sealed class SettingsForm : Form
             BackColor = EditBgColor,
             Location = new Point(x, y),
             Width = w,
-            Height = 22,
+            // Note: TextBox auto-sizes its Height to fit Font when Multiline=false
+            // (per MS AutoScaleMode docs, TextBox/Label use Font scaling regardless
+            // of AutoScaleMode). The Height = 24 literal is treated as a minimum
+            // intent for layout consistency with the NUD at MinimumSize.Height=26
+            // and surrounding buttons at 26 — the actual rendered height tracks
+            // Font.Height + chrome at the current monitor's DPI.
+            Height = 24,
             BorderStyle = BorderStyle.FixedSingle,
         };
         if (accessibleName is not null) tb.AccessibleName = accessibleName;
@@ -923,13 +942,23 @@ internal sealed class SettingsForm : Form
             DropDownStyle = ComboBoxStyle.DropDownList,
             FlatStyle = FlatStyle.Flat,
             DrawMode = DrawMode.OwnerDrawFixed,
-            ItemHeight = 20,
+            // ItemHeight set below AFTER Controls.Add so cb.DeviceDpi reports the
+            // form's actual current monitor DPI. AutoScaleMode.Dpi does NOT scale
+            // ItemHeight (it's an int property, not a Size, so the auto-scale walk
+            // skips it). Font.Height alone is computed against the screen DC at
+            // 96 DPI design metrics — stays ~15px regardless of monitor, so
+            // ItemHeight would clip at 150%+ scale where the rendered 9pt Segoe UI
+            // is ~23px tall. Font.GetHeight(deviceDpi) returns the actual physical
+            // pixel height at this monitor's DPI; LogicalToDeviceUnits scales the
+            // 4px chrome padding to match. Together they produce a row that fits
+            // glyphs at every DPI from 100% to 250%.
         };
         if (accessibleName is not null) cb.AccessibleName = accessibleName;
         cb.DrawItem += OnDrawComboItem;
         cb.Items.AddRange(items);
         cb.SelectedIndex = selectedIndex;
         Controls.Add(cb);
+        cb.ItemHeight = (int)Math.Ceiling(cb.Font.GetHeight(cb.DeviceDpi)) + cb.LogicalToDeviceUnits(4);
         return cb;
     }
 
@@ -962,7 +991,7 @@ internal sealed class SettingsForm : Form
             Text = text,
             Font = _btnFont,
             Location = new Point(x, y),
-            Size = new Size(w, 24),
+            Size = new Size(w, 26),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,

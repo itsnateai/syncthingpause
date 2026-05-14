@@ -90,6 +90,10 @@ github.com/itsnateai/syncthingpause";
         ClientSize = new Size(400, 380);
         BackColor = BgColor;
         ShowInTaskbar = false;
+        // Pin design baseline to 96 DPI BEFORE AutoScaleMode so literal Size/Point
+        // values below are always interpreted at 96 DPI regardless of which monitor
+        // the form is realized on. See SettingsForm.cs for the full rationale.
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
         var labelFont = new Font("Segoe UI", 10f, FontStyle.Bold);

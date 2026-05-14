@@ -4,6 +4,29 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.0.1 — 2026-05-14
+
+### Fix: form layout broken at non-100% display scale on Windows 11
+
+Reported by a user running v3.0.0 on a Windows 11 laptop at 125% display scale: buttons rendered with no bottom border, the "Windows startup delay" `NumericUpDown` digits were hidden, ComboBox dropdown rows clipped, other text rendered "weird." The app's `app.manifest` correctly declared `PerMonitorV2` DPI awareness, but the source-generated `ApplicationConfiguration.Initialize()` was defaulting to `SystemAware` because the csproj was missing `<ApplicationHighDpiMode>`. Individual `Form` subclasses set `AutoScaleMode = AutoScaleMode.Dpi` without first pinning `AutoScaleDimensions`, so the design baseline was non-deterministically captured from whichever monitor first realized each form. The result was a split-brain DPI declaration where the OS, the WinForms runtime, and individual controls each used a different baseline — visually correct at 100% on the dev box, off-by-a-DPI-ratio on every other display scale.
+
+- **`SyncthingPause.csproj`** — added `<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>` to align the generated initializer with the manifest, and `<ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>` so un-fonted controls don't fall back to Microsoft Sans Serif 8.25pt.
+- **Every `Form` subclass** (`SettingsForm`, `HelpForm`, `UpdateDialog`, `OsdToolTip`, the nested `ToastWindow`) — pinned `AutoScaleDimensions = new SizeF(96F, 96F)` BEFORE `AutoScaleMode = AutoScaleMode.Dpi` so all literal `Size`/`Point` values are interpreted at 96 DPI design baseline regardless of monitor.
+- **`NumericUpDown`** — widened the "Windows startup delay" spinner from 60→80 pixels and added a `MinimumSize` floor of `(80, 26)`. The spinner band composes via three nested HWNDs whose scaling math diverges at non-integer DPI ratios; at 60px the band ate ~25px of the cell at 125%, leaving no room for 4-digit values.
+- **`OwnerDrawFixed` ComboBox dropdown rows** — `ItemHeight` is now computed per-monitor as `Math.Ceiling(Font.GetHeight(DeviceDpi)) + LogicalToDeviceUnits(4)`. `AutoScaleMode.Dpi` does not walk int-typed properties so `ItemHeight = 20` stayed at design pixels forever; rendered 9pt Segoe UI grows to ~23px at 150% scale and clipped descenders.
+- **Buttons** — minimum height raised to 26 (from 22/24) so the bottom border survives scaling at 125%/150%/175%. Affects 9 buttons across Settings/Help dialogs.
+- **`TextBox` helper** — minimum height bumped from 22→24 for layout consistency with the surrounding controls (single-line TextBox actually auto-sizes to Font, so the literal is layout intent rather than a hard constraint).
+
+### What this means for users
+
+If you've been seeing layout artifacts on a non-primary laptop (Surface, ThinkPad with HiDPI panel, any machine where Windows 11 Display Settings → Scale is set to anything other than 100%), the v3.0.1 self-update will resolve them. No state migration required. If a layout artifact persists after updating, **restart the app** — Windows 11 does not propagate display-scale changes to already-running processes (the OS itself shows a banner about this).
+
+### Verifier coverage
+
+- 87 tests pass (no new tests — this is a pure layout/render fix with no behavioral surface to test in MSTest).
+- 3-round verifier sweep with pair-by-topic dispatch (Sonnet + Opus on each topic), 10 agent-reports total: R1 confirmed the 4 initial fixes; R2 caught helper-pattern gaps (TextBox/ComboBox helpers + `OsdToolTip` missing pin); R3 caught a missed button height + the nested `ToastWindow` missing pin + a substantive correctness issue with `Font.Height` resolution (was set post-parenting expecting per-monitor resolution; corrected to `Font.GetHeight(DeviceDpi)` which actually consults the current monitor).
+- Canonical fix documented at `_.claude/_templates/snippets/csharp/winforms-dpi-scaling.md` for retrofit across sibling tray apps.
+
 ## v3.0.0 — 2026-05-08
 
 ### Renamed: SyncthingTray → SyncthingPause
