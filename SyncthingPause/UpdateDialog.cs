@@ -199,11 +199,14 @@ internal sealed class UpdateDialog : Form
             _cts?.Cancel();
             DialogResult = DialogResult.Cancel;
             Close();
-            // v3.2.10: the post-swap-success-but-relaunch-failed state needs OK
-            // to also exit the running v(N-1) process — see _exitOnCancel docs.
-            // Closing the dialog alone leaves the user running the old version
-            // with the new exe sitting unused at exePath.
-            if (_exitOnCancel) Application.Exit();
+            // v3.2.11: Application.Exit moved to OnFormClosed below. Pre-v3.2.11
+            // this lambda also called `if (_exitOnCancel) Application.Exit()`,
+            // but that fires only on the button click path — title-bar X and
+            // Alt-F4 bypass it (WM_CLOSE → FormClosing → FormClosed, never
+            // through the click handler), so the user could dismiss the
+            // post-swap "OK & Exit" dialog via X and end up with v3.2.10 sitting
+            // installed but the still-loaded old code refusing to release.
+            // OnFormClosed catches every close path uniformly.
         };
         Controls.Add(_btnCancel);
 
@@ -406,6 +409,11 @@ internal sealed class UpdateDialog : Form
 
     private void ShowVersionComparison()
     {
+        // v3.2.11: defensive reset — only ShowUpdateInstalledRestartManually
+        // sets this flag today, but if a future code path transitions from the
+        // post-swap-failure state back to version comparison (e.g. a "Try again"
+        // affordance), pressing OK here must NOT exit the process.
+        _exitOnCancel = false;
         _marqueeTimer.Stop();
         // v3.2.5: height tracks _progressOuter.Height (post-Show physical) so
         // the fill matches the container at every DPI. Pre-v3.2.5 used a raw
@@ -610,7 +618,12 @@ internal sealed class UpdateDialog : Form
     /// </summary>
     private async Task<bool> TryRelaunchAfterUpdateAsync(string exePath)
     {
-        try { await Task.Delay(250); } catch { /* delay is best-effort */ }
+        // No CancellationToken on purpose — at the relaunch point the swap is
+        // already committed; user-initiated Cancel from the dialog can't undo
+        // an installed exe, so a 250 ms uninterruptible delay here is correct
+        // (and Task.Delay without a token can't throw, so no try/catch needed —
+        // v3.2.10 had a defensive try/catch that was dead code, removed in v3.2.11).
+        await Task.Delay(250);
         try
         {
             // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- exePath is Environment.ProcessPath; the replacement binary was SHA256-verified above against a SHA256SUMS asset from the github.com/itsnateai/ allowlisted origin
@@ -793,6 +806,8 @@ internal sealed class UpdateDialog : Form
     /// </summary>
     private void ShowError(string message, string detail)
     {
+        // v3.2.11: defensive reset — see ShowVersionComparison's matching note.
+        _exitOnCancel = false;
         _marqueeTimer.Stop();
         _progressOuter.Visible = false;
         _lblStatus.Text = message;
@@ -1041,6 +1056,20 @@ internal sealed class UpdateDialog : Form
                 return parts[0].Trim();
         }
         return null;
+    }
+
+    /// <summary>
+    /// v3.2.11: centralized exit-on-close for the post-swap-success-but-relaunch-failed
+    /// state. Fires for ALL close paths — button click via Close(), title-bar X,
+    /// Alt-F4, programmatic Close() — so the user can't accidentally dismiss the
+    /// "OK & Exit" dialog via window chrome and end up with the new exe installed
+    /// but the still-loaded old code refusing to release. Pre-v3.2.11 only the
+    /// _btnCancel.Click lambda checked _exitOnCancel, which X/Alt-F4 bypass.
+    /// </summary>
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        base.OnFormClosed(e);
+        if (_exitOnCancel) Application.Exit();
     }
 
     protected override void Dispose(bool disposing)

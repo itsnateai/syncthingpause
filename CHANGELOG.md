@@ -4,6 +4,29 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.11 — 2026-05-18
+
+### Fix: v3.2.10 verifier-round cleanups — close-path bypass, defensive resets, dead-catch strip
+
+A six-agent verifier sweep on the v3.2.10 ship caught three follow-up issues; v3.2.11 addresses all three.
+
+- **Critical: title-bar X / Alt-F4 bypassed the new `_exitOnCancel` flag.** The v3.2.10 post-swap-success-but-relaunch-failed dialog showed an "OK & Exit" button that called `Application.Exit()` from inside the button's Click lambda. Window-chrome close paths (X button, Alt-F4) route through WM_CLOSE → FormClosing → FormClosed without firing the Click handler, so a user who dismissed the dialog via the X would end up with the new exe installed at `exePath` but the running old-version process never releasing — silently stuck on the old version with no way to know. `Application.Exit()` moved into an `OnFormClosed` override that catches every close path uniformly.
+- **Defensive: `_exitOnCancel` was never reset to `false`.** Today the dialog is single-use (created, ShowDialog'd, disposed) so the missing reset is latent. But if a future code path transitions out of the post-swap-failure state back into version-comparison or error-display, OK should NOT exit the process. Added explicit `_exitOnCancel = false` at the top of `ShowError` and `ShowVersionComparison`.
+- **Cleanup: dead `try/catch` around `Task.Delay(250)`.** The v3.2.10 pre-relaunch delay wrapped `Task.Delay` in a try/catch that was unreachable (no `CancellationToken` is passed → `Task.Delay` can't throw `OperationCanceledException` from this call). Stripped the dead catch with a comment explaining why the delay is deliberately uninterruptible at the relaunch point (the swap is already committed; user-initiated Cancel can't undo an installed exe).
+
+### Why this matters
+
+The v3.2.10 fix unblocks users stuck in the catch-all-rollback retry loop; v3.2.11 buttons up the rough edges the v3.2.10 ship's verifier round exposed. Both versions ship the architectural fix (install ≠ relaunch); v3.2.11 is the production-readiness pass on top of it.
+
+### What's underneath
+
+- **`SyncthingPause/UpdateDialog.cs`** — new `OnFormClosed` override centralizing `Application.Exit` for every close path. Removed the duplicate `if (_exitOnCancel) Application.Exit()` call from the `_btnCancel.Click` lambda (replaced with explanatory comment about why the centralized path is correct). Added defensive `_exitOnCancel = false` resets in `ShowError` and `ShowVersionComparison`. Stripped the dead `try/catch` around `Task.Delay(250)` in `TryRelaunchAfterUpdateAsync`.
+- **`SyncthingPause.csproj`** — 3.2.10 → 3.2.11.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Three of the v3.2.10 verifier-round critical/medium findings (X-button bypass, missing flag reset, dead try/catch) are addressed by this release; the remaining findings were assessed as false positives (mutex race already mitigated by `Program.Main`'s 5-second retry on `isRelaunch`; SmartScreen UI-spawn speculation; `<FileVersion>` SDK auto-sync).
+
 ## v3.2.10 — 2026-05-18
 
 ### Fix: in-app upgrade rolled back successful installs on a transient relaunch failure
