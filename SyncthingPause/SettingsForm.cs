@@ -104,7 +104,12 @@ internal sealed class SettingsForm : Form
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        int sw = 410;
+        // v3.2.6: sw 410 → 440. The +30 design-px give the v3.2.2 hand-tuned
+        // top button row a wider playing field: bumps Update (62→78) and Check
+        // Config (98→114) so neither clips even at 125%+ DPI where Segoe UI
+        // glyph hinting widens text non-linearly. Bottom row Save/Apply/Cancel
+        // re-centered to fill the new width symmetrically.
+        int sw = 440;
         int y = 10;
 
         BuildClickActionsSection(ref y, sw);
@@ -717,17 +722,22 @@ internal sealed class SettingsForm : Form
         // — 114 design-px is wide enough for 6-char "Cancel" at 9pt Segoe UI
         // even at 200% DPI, and the trio's symmetry depends on uniform width.
 
-        // Hand-tuned widths (design-px) chosen with ~24-32 px chrome margin
-        // around the measured text — uniform visual rhythm at 100%, enough
-        // slack that DPI auto-scaling at 125-200% never clips.
-        //   16 (margin) + GitHub(72) + Update(62) + Syncthing(82) + Help(52)
-        //                + Check Config(98) + 4*BtnGap(5) = 402, leaves 8px
-        //                right margin at sw=410.
+        // v3.2.6: Update 62 → 78 (was clipping to "Updat" at 125 % — the +6 from
+        // v3.2.2 wasn't enough on Suzy's screen; +16 gives ~38 px of chrome
+        // margin around "Update" text ~40 design-px). Check Config 98 → 114
+        // (was clipping to "Check" at 125 % — same story, +18 gives ~40 px
+        // chrome margin around "Check Config" ~75 design-px). Hand-tuned chrome
+        // margins now ~30-40 % of button width, enough that DPI auto-scaling
+        // at 125-200 % can't eat through them. Form sw was widened 410 → 440
+        // to accommodate the bumps without crowding GitHub/Syncthing/Help.
+        //   16 (margin) + GitHub(72) + Update(78) + Syncthing(82) + Help(52)
+        //                + Check Config(114) + 4*BtnGap(5) = 434, leaves 6 px
+        //                right margin at sw=440.
         const int BtnGap = 5;
 
         var btnGitHub = AddLinkButton("GitHub", 16, y, 72, "https://github.com/itsnateai/syncthingpause");
 
-        var btnUpdate = AddSizedButton("Update", 62);
+        var btnUpdate = AddSizedButton("Update", 78);
         btnUpdate.Location = new Point(btnGitHub.Right + LogicalToDeviceUnits(BtnGap), btnGitHub.Top);
         btnUpdate.Click += (_, _) =>
         {
@@ -746,17 +756,22 @@ internal sealed class SettingsForm : Form
             hf.ShowDialog(this);
         };
 
-        var btnCheck = AddSizedButton("Check Config", 98);
+        var btnCheck = AddSizedButton("Check Config", 114);
         btnCheck.Location = new Point(btnHelp.Right + LogicalToDeviceUnits(BtnGap), btnGitHub.Top);
         btnCheck.AccessibleName = "Check Config";
         btnCheck.Click += OnCheckConfig;
         y += 34;
 
+        // v3.2.6: bottom row Save/Apply/Cancel re-centered for the new sw=440.
+        // Sum = 3*114 + 2*18 = 378. Left margin = (440 - 378) / 2 = 31, giving
+        // symmetric 31 px left + right margins. Pre-v3.2.6 was hardcoded at
+        // x=16/148/280 which left a lopsided 16 left / 46 right margin in the
+        // wider form. Positions are still design-px (autoscaled at Controls.Add).
         var btnSave = new Button
         {
             Text = "Save",
             Font = _normalFont,
-            Location = new Point(16, y),
+            Location = new Point(31, y),
             Size = new Size(114, 30),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
@@ -769,7 +784,7 @@ internal sealed class SettingsForm : Form
         {
             Text = "Apply",
             Font = _normalFont,
-            Location = new Point(148, y),
+            Location = new Point(163, y),
             Size = new Size(114, 30),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
@@ -782,7 +797,7 @@ internal sealed class SettingsForm : Form
         {
             Text = "Cancel",
             Font = _normalFont,
-            Location = new Point(280, y),
+            Location = new Point(295, y),
             Size = new Size(114, 30),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,

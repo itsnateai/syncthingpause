@@ -4,6 +4,29 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.6 — 2026-05-18
+
+### Fix: Settings dialog Update + Check Config widths still clipped at 125%
+
+The v3.2.2 width bumps (Update 58 → 62, Check Config 100 → 98) were not generous enough — on Suzy's 125% display the Update button still clipped its trailing 'e' to "Updat" and Check Config clipped most of its text down to "Check". The v3.2.2 chrome margins were ~20-22 design-px each side, which is enough at 100% but Segoe UI hinting at 125% widens glyphs non-linearly and eats through the margin.
+
+v3.2.6 bumps those two buttons more aggressively:
+- **Update**: 62 → 78 (+16 design-px, now ~38 px chrome margin around "Update" text ~40 design-px)
+- **Check Config**: 98 → 114 (+16 design-px, now ~40 px chrome margin around "Check Config" text ~75 design-px)
+
+The form `sw` widens 410 → 440 to fit the bumps without crowding GitHub / Syncthing / Help. Bottom row Save / Apply / Cancel re-centered at `x=31 / 163 / 295` (was `16 / 148 / 280`) so the trio sits symmetrically in the new width — the previous layout would have left a 16-px left / 46-px right asymmetric margin on the bottom row.
+
+### What's underneath
+
+- **`SettingsForm.cs · ctor`** — `int sw = 410` → `int sw = 440`. Form `ClientSize = new Size(sw, y)` and section dividers (`AddDivider(0, y, sw)`, `AddDivider(labelEnd, y + 7, sw - labelEnd - 10)`) automatically widen with the new sw.
+- **`SettingsForm.cs · BuildButtonRow`** — `AddSizedButton("Update", 62)` → `AddSizedButton("Update", 78)`; `AddSizedButton("Check Config", 98)` → `AddSizedButton("Check Config", 114)`. Position chaining via `prior.Right + LogicalToDeviceUnits(BtnGap=5)` unchanged — the chain absorbs the wider buttons automatically.
+- **`SettingsForm.cs · BuildButtonRow`** — bottom row `Save` / `Apply` / `Cancel` Location.X: `16/148/280` → `31/163/295` (still design-px, autoscaled). Math: `sum = 3*114 + 2*18 = 378`; `(440 - 378) / 2 = 31` left margin = 31 right margin = symmetric.
+- **`SyncthingPause.csproj`** — 3.2.5 → 3.2.6.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file deployed to `C:\Users\nate\proggy\Tools\syncthingpause\SyncthingPause.exe`, propagated to Suzy via the `ToSuzy` Syncthing share, and published as a GitHub Release (`v3.2.6` tag) so Suzy's in-app updater picks it up via Settings → Update → Check.
+
 ## v3.2.5 — 2026-05-18
 
 ### Fix: UpdateDialog single-button-mode centering at 125%+ DPI + marquee scaling
