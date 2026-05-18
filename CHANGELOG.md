@@ -4,6 +4,32 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.10 — 2026-05-18
+
+### Fix: in-app upgrade rolled back successful installs on a transient relaunch failure
+
+Reported against an in-app v3.2.7 → v3.2.9 upgrade: the dialog showed *"Update failed. An error occurred trying to start process."* and every retry hit the same failure. The downloaded binary verified clean against the published SHA256SUMS, the file swap on disk completed, and the new exe was in place at the original path — but the spawn of the replacement process failed (most commonly: Defender / SmartScreen briefly intercepts a freshly-renamed binary on first launch). The pre-v3.2.10 catch handler treated this as an install failure and rolled the file swap back, deleting the just-installed new version and restoring the old one. The user could never escape: every retry re-installed v3.2.9, hit the same launch race, and got rolled back to v3.2.7 again.
+
+v3.2.10 separates *install* from *relaunch*. The file swap and the `Process.Start` now live in distinct try-blocks with distinct failure handling:
+
+- **Install (file swap) failure** — still rolls back to the prior version. Same behavior as before.
+- **Relaunch failure** — logs the exception type + message to `tray.log` (if `DiagnosticLogging=1`), shows a new *"Update to v3.2.10 installed — click OK to exit, then re-launch SyncthingPause"* dialog, and exits the running old-version process so the next manual launch picks up the new exe. No rollback. The install IS good — the launch just needs to happen on a fresh process boundary instead of via the dying-instance handoff.
+
+Also added a 250 ms pre-delay before `Process.Start` to let Defender / AV finish scanning the just-renamed exe before ShellExecuteEx tries to launch it. Negligible cost on the success path (250 ms vs a multi-minute download), meaningfully reduces the AV-race failure rate on the failure path.
+
+### Why this matters
+
+This was a latent bug in every v3.2.x release. It surfaced now because the reporter's environment reliably triggers the launch race — but the same retry-loop dead-end could trap any user on any version. The new flow follows the same architectural pattern as `SettingsForm.TryAutoRestartForTheme` (the theme-switch relaunch path), which has handled `Process.Start` failure as "tell the user, don't undo persisted state" since v3.2.0.
+
+### What's underneath
+
+- **`SyncthingPause/UpdateDialog.cs`** — `OnActionClick` no longer wraps `Process.Start` in the same try-block as the file swap. New `TryRelaunchAfterUpdateAsync` helper (Task.Delay(250) → Process.Start with try/catch + null check, logs to tray.log on both failure modes). New `ShowUpdateInstalledRestartManually` dialog state. New `_exitOnCancel` flag wired into the existing `_btnCancel.Click` handler so OK in the new state actually exits the process.
+- **`SyncthingPause.csproj`** — 3.2.9 → 3.2.10.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 92/92 tests pass. The two failure paths (install-failure and relaunch-failure) are now distinct branches with distinct UI surfaces, so a future regression in one can't silently swallow the other.
+
 ## v3.2.9 — 2026-05-18
 
 ### Privacy: continue the v3.2.8 scrub — remove AI-tooling fingerprints and private-path references

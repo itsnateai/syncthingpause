@@ -44,6 +44,14 @@ internal sealed class UpdateDialog : Form
     // SyncthingUpdateDialog for symmetric resilience across both upgrade dialogs.
     private bool _busy;
 
+    // v3.2.10: post-swap-success-but-relaunch-failed path needs the OK button to
+    // also Application.Exit so the running v(N-1) process actually terminates —
+    // otherwise the user is left with the new exe in place at exePath but the
+    // old version still running in memory, and a fresh manual launch is the only
+    // way to pick up the upgrade. ShowUpdateInstalledRestartManually flips this
+    // before re-labeling the cancel button to "OK & Exit".
+    private bool _exitOnCancel;
+
     private const string AppName = "SyncthingPause";
     private const string GitHubRepo = "itsnateai/syncthingpause";
 
@@ -191,6 +199,11 @@ internal sealed class UpdateDialog : Form
             _cts?.Cancel();
             DialogResult = DialogResult.Cancel;
             Close();
+            // v3.2.10: the post-swap-success-but-relaunch-failed state needs OK
+            // to also exit the running v(N-1) process — see _exitOnCancel docs.
+            // Closing the dialog alone leaves the user running the old version
+            // with the new exe sitting unused at exePath.
+            if (_exitOnCancel) Application.Exit();
         };
         Controls.Add(_btnCancel);
 
@@ -534,17 +547,12 @@ internal sealed class UpdateDialog : Form
                 File.Move(exePath, oldPath);
             File.Move(newPath, exePath);
 
-            // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- exePath is Environment.ProcessPath; the replacement binary was SHA256-verified above against a SHA256SUMS asset from the github.com/itsnateai/ allowlisted origin
-            using var _ = Process.Start(new ProcessStartInfo(exePath)
-            {
-                Arguments = "--after-update",
-                UseShellExecute = true
-            });
-            Application.Exit();
+            TrayLog.Info($"Update v{_remoteVersion} swap complete — new exe in place, attempting relaunch.");
         }
         catch (IOException ex)
         {
             TryRollback(exePath, oldPath, newPath, ex);
+            return;
         }
         catch (TaskCanceledException)
         {
@@ -557,11 +565,97 @@ internal sealed class UpdateDialog : Form
             // guard at the top of OnActionClick. Found by Round-4 verifier sweep.
             _busy = false;
             if (!IsDisposed) ShowVersionComparison();
+            return;
         }
         catch (Exception ex)
         {
             TryRollback(exePath, oldPath, newPath, ex);
+            return;
         }
+
+        // v3.2.10: relaunch is a SEPARATE concern from install. If we reach here the
+        // swap above succeeded — the new exe is at exePath. A Process.Start failure
+        // from this point is a launch-time problem (Defender/SmartScreen intercepting
+        // a freshly-renamed binary, transient AV scan lock, ShellExecuteEx UAC race),
+        // NOT an install-time problem. Pre-v3.2.10 wrapped the relaunch in the same
+        // try-block and the catch(Exception) handler called TryRollback — which
+        // deleted the just-installed new exe and restored the old one. Net effect:
+        // every retry from the user landed in the same Process.Start failure, with
+        // no way out (the install kept being thrown away even though it succeeded).
+        // Reported 2026-05-18 against v3.2.7→v3.2.9 upgrade. The install IS good —
+        // tell the user, exit, let them re-launch fresh.
+        if (await TryRelaunchAfterUpdateAsync(exePath))
+        {
+            Application.Exit();
+            return;
+        }
+        if (!IsDisposed) ShowUpdateInstalledRestartManually();
+    }
+
+    /// <summary>
+    /// Attempt to spawn the freshly-installed exe with --after-update. A 250 ms
+    /// pre-delay gives Defender / AV a chance to release the just-renamed binary
+    /// — without it, ShellExecuteEx can intermittently fail with a Win32 error
+    /// against a file the AV is mid-scan on or has briefly quarantined. The
+    /// delay is no-op when no AV is watching, so the worst-case cost is 250 ms
+    /// on a successful update (negligible vs the multi-minute download path).
+    ///
+    /// Returns true if Process.Start spawned a new process; false (and logs the
+    /// failure to tray.log with exception type + message) otherwise. Caller is
+    /// responsible for the "install succeeded, please relaunch" UI on false.
+    ///
+    /// Mirrors SettingsForm.TryAutoRestartForTheme — same failure-handling
+    /// contract so both relaunch paths (theme-switch and update) treat
+    /// Process.Start failure as "tell the user, don't undo persisted state".
+    /// </summary>
+    private async Task<bool> TryRelaunchAfterUpdateAsync(string exePath)
+    {
+        try { await Task.Delay(250); } catch { /* delay is best-effort */ }
+        try
+        {
+            // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- exePath is Environment.ProcessPath; the replacement binary was SHA256-verified above against a SHA256SUMS asset from the github.com/itsnateai/ allowlisted origin
+            using var p = Process.Start(new ProcessStartInfo(exePath)
+            {
+                Arguments = "--after-update",
+                UseShellExecute = true,
+            });
+            if (p == null)
+            {
+                TrayLog.Warn("Update relaunch — Process.Start returned null.");
+                return false;
+            }
+            TrayLog.Info($"Update relaunch — spawned PID {p.Id}.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TrayLog.Warn($"Update relaunch failed (err={ex.GetType().Name}: {ex.Message})");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Post-swap relaunch-failure dialog state. The new exe IS in place at
+    /// exePath (the file swap succeeded) — we just couldn't spawn the
+    /// replacement process. Don't roll back; tell the user the new version
+    /// is installed and they need to start SyncthingPause manually. The OK
+    /// button exits the current (still-old) process via _exitOnCancel so the
+    /// next launch actually picks up the upgrade.
+    /// </summary>
+    private void ShowUpdateInstalledRestartManually()
+    {
+        _marqueeTimer.Stop();
+        _progressOuter.Visible = false;
+        _lblStatus.Text = $"Update to v{_remoteVersion} installed.";
+        _lblStatus.ForeColor = FgColor;
+        _lblDetail.Text = "Click OK to exit, then re-launch SyncthingPause.";
+        _btnAction.Visible = false;
+        _btnCancel.Text = "OK & Exit";
+        _btnCancel.Location = new Point(
+            (ClientSize.Width - _btnCancel.Width) / 2,
+            _btnAction.Top);
+        _exitOnCancel = true;
+        _busy = false;
     }
 
     private void TryRollback(string exePath, string oldPath, string newPath, Exception? cause)

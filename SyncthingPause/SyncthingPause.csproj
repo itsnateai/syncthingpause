@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Resources\sync.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>3.2.9</Version>
+    <Version>3.2.10</Version>
     <AssemblyName>SyncthingPause</AssemblyName>
     <RootNamespace>SyncthingPause</RootNamespace>
     <Nullable>enable</Nullable>
