@@ -47,6 +47,15 @@ internal sealed class UpdateDialog : Form
     private const string AppName = "SyncthingPause";
     private const string GitHubRepo = "itsnateai/syncthingpause";
 
+    // v3.2.4: layout constants promoted to class scope so the single-button-mode
+    // handlers (ShowVersionComparison, ShowError, ShowWingetNotice) can re-center
+    // _btnCancel via CenterX(_btnW) instead of duplicating literal Point values.
+    // Pre-v3.2.4 each handler used `new Point(170, 112)` — a hardcoded mid-point
+    // for the old 420-wide form's 110-wide button, off-center by 15 px and stale
+    // the moment the geometry changes.
+    private const int _btnW = 100;
+    private const int _btnRowY = 108;
+
     // Theme-aware caches — Theme.Initialize runs before this class is first
     // touched (Update button click is well after TrayApplicationContext ctor).
     private static readonly Color BgColor = Theme.Bg;
@@ -70,7 +79,16 @@ internal sealed class UpdateDialog : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         TopMost = true;
-        ClientSize = new Size(420, 180);
+        // v3.2.4: was (420, 180) — tightened to (360, 154). Pre-v3.2.4 the dialog
+        // had ~94 px of vertical content (status 24 + detail 20 + progress 18 +
+        // button row 32) inside 180 px = 86 px of dead padding (~48 % of dialog
+        // height). The label widths (370) inside a 420 px form left an asymmetric
+        // 20/30 px L/R margin, so labels weren't centered — visible at 125 % DPI
+        // (the "not centered on Suzy" report). The new geometry has ~94 px content
+        // + 60 px padding (16 top, 16 bottom, +6/12 gaps) with all controls
+        // dynamically centered via CenterX() so the dialog reads symmetric at
+        // every DPI.
+        ClientSize = new Size(360, 154);
         BackColor = BgColor;
         ForeColor = FgColor;
         ShowInTaskbar = false;
@@ -84,11 +102,23 @@ internal sealed class UpdateDialog : Form
         _italicFont = new Font("Segoe UI", 7.5f, FontStyle.Italic);
         _btnFont = new Font("Segoe UI", 8f);
 
+        // v3.2.4: every horizontally-positioned control's X is derived from the
+        // form's design-px ClientSize.Width via CenterX(). Pre-v3.2.4 each
+        // Location.X was a hand-tuned literal that drifted off-center as the form
+        // size or button width changed — the status/detail labels' 10 px L/R
+        // asymmetry and the button row's 11–15 px right-of-center offsets were
+        // both side effects of that drift. Now any future ClientSize change
+        // automatically re-centers the whole layout.
+        const int LabelW = 324;   // 360 - 18 - 18 = 324, matches L/R 18 px margins
+        const int ProgressW = 324;
+        const int BtnGap = 12;
+        const int BtnRowW = _btnW + BtnGap + _btnW; // 212 for two buttons
+
         _lblStatus = new Label
         {
             Text = "Checking GitHub for new version...",
-            Location = new Point(20, 20),
-            Size = new Size(370, 24),
+            Location = new Point(CenterX(LabelW), 16),
+            Size = new Size(LabelW, 24),
             Font = _boldFont,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -99,8 +129,8 @@ internal sealed class UpdateDialog : Form
         _lblDetail = new Label
         {
             Text = "",
-            Location = new Point(20, 48),
-            Size = new Size(370, 20),
+            Location = new Point(CenterX(LabelW), 46),
+            Size = new Size(LabelW, 20),
             ForeColor = DimColor,
             BackColor = BgColor,
             Font = _italicFont,
@@ -110,30 +140,32 @@ internal sealed class UpdateDialog : Form
 
         _progressOuter = new Panel
         {
-            Location = new Point(30, 80),
-            Size = new Size(350, 18),
+            Location = new Point(CenterX(ProgressW), 76),
+            Size = new Size(ProgressW, 16),
             BackColor = ProgressBg,
             BorderStyle = BorderStyle.None
         };
         _progressFill = new Panel
         {
             Location = new Point(0, 0),
-            Size = new Size(0, 18),
+            Size = new Size(0, 16),
             BackColor = ProgressFg
         };
         _progressOuter.Controls.Add(_progressFill);
         Controls.Add(_progressOuter);
 
-        // Two-button row laid out to match SettingsForm/HelpForm conventions:
-        // both buttons 110 px wide, ending at x=406 (16 px right margin on a
-        // 420 px form — mirrors the other dialogs' right-aligned 16 px margin).
-        // Pre-v2.2.30 the buttons were 110/80 with a 45 px right margin, which
-        // read as "a bit off" next to the other two dialogs.
+        // v3.2.4: two-button row centered as a unit (left x = CenterX(BtnRowW)).
+        // Pre-v3.2.4 buttons were 110 wide at hardcoded x=166/296 in a 420-wide
+        // form — visually 11 px right of center, which read as a subtle layout
+        // imbalance even at 100 % DPI. 100-wide buttons at the new geometry
+        // ("Upgrade Now" = ~80 px text + 20 px chrome) fit comfortably even at
+        // 200 % DPI.
+        int btnRowLeft = CenterX(BtnRowW);
         _btnAction = new Button
         {
             Text = "Upgrade Now",
-            Location = new Point(166, 112),
-            Size = new Size(110, 32),
+            Location = new Point(btnRowLeft, _btnRowY),
+            Size = new Size(_btnW, 30),
             Visible = false,
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
@@ -146,8 +178,8 @@ internal sealed class UpdateDialog : Form
         _btnCancel = new Button
         {
             Text = "Cancel",
-            Location = new Point(296, 112),
-            Size = new Size(110, 32),
+            Location = new Point(btnRowLeft + _btnW + BtnGap, _btnRowY),
+            Size = new Size(_btnW, 30),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -169,12 +201,16 @@ internal sealed class UpdateDialog : Form
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
         _marqueeTimer.Tick += (_, _) =>
         {
+            // v3.2.4: progress bar height tightened 18 → 16 to match the new
+            // dialog geometry; _progressFill.Size must use the same height as
+            // _progressOuter or the bar would render with a 2 px slice above/
+            // below clipped to the parent's bounds.
             const int step = 4, barW = 80;
             if (_marqueeForward) _marqueePos += step; else _marqueePos -= step;
             if (_marqueePos + barW >= _progressOuter.Width) _marqueeForward = false;
             if (_marqueePos <= 0) _marqueeForward = true;
             _progressFill.Location = new Point(_marqueePos, 0);
-            _progressFill.Size = new Size(barW, 18);
+            _progressFill.Size = new Size(barW, 16);
         };
 
         Shown += async (_, _) =>
@@ -187,6 +223,20 @@ internal sealed class UpdateDialog : Form
             await CheckForUpdateAsync();
         };
     }
+
+    /// <summary>
+    /// v3.2.4: returns the x coordinate that horizontally centers a control of
+    /// the given design-px width inside this dialog. Used by every Location
+    /// assignment in the ctor + the three single-button-mode handlers
+    /// (ShowVersionComparison, ShowError, ShowWingetNotice) so the layout
+    /// stays symmetric regardless of future ClientSize tweaks. Math runs in
+    /// design-px (ClientSize.Width is the design-baseline value set before
+    /// any Controls.Add); AutoScaleMode.Dpi scales the returned Point at
+    /// realization. The "_ = 0;" line silences CS8618 on _btnCancel which
+    /// is initialized further down — call sites use this helper only after
+    /// ClientSize is set so the divide-by-2 is well-defined.
+    /// </summary>
+    private int CenterX(int controlWidth) => (ClientSize.Width - controlWidth) / 2;
 
     private static HttpClient CreateHttpClient()
     {
@@ -337,7 +387,7 @@ internal sealed class UpdateDialog : Form
     private void ShowVersionComparison()
     {
         _marqueeTimer.Stop();
-        _progressFill.Size = new Size(0, 18);
+        _progressFill.Size = new Size(0, 16);
         _progressFill.Location = new Point(0, 0);
 
         var localVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
@@ -360,7 +410,7 @@ internal sealed class UpdateDialog : Form
             _lblStatus.Text = "You're on the latest version!";
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
-            _btnCancel.Location = new Point(170, 112);
+            _btnCancel.Location = new Point(CenterX(_btnW), _btnRowY);
         }
     }
 
@@ -588,7 +638,7 @@ internal sealed class UpdateDialog : Form
                 if (IsDisposed) return;
                 int pct = (int)(downloaded * 100 / totalBytes);
                 _progressFill.Size = new Size(
-                    (int)(_progressOuter.Width * downloaded / totalBytes), 18);
+                    (int)(_progressOuter.Width * downloaded / totalBytes), 16);
                 var dlMB = downloaded / (1024.0 * 1024.0);
                 var totalMB = totalBytes / (1024.0 * 1024.0);
                 _lblDetail.Text = totalMB < 1
@@ -635,7 +685,7 @@ internal sealed class UpdateDialog : Form
         _lblDetail.Text = detail;
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
-        _btnCancel.Location = new Point(170, 112);
+        _btnCancel.Location = new Point(CenterX(_btnW), _btnRowY);
         _busy = false;
     }
 
@@ -799,7 +849,7 @@ internal sealed class UpdateDialog : Form
         _lblDetail.Text = "Use:  winget upgrade itsnateai.SyncthingPause";
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
-        _btnCancel.Location = new Point(170, 112);
+        _btnCancel.Location = new Point(CenterX(_btnW), _btnRowY);
     }
 
     // ─── Helpers ────────────────────────────────────────────────

@@ -4,6 +4,25 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.4 — 2026-05-18
+
+### Fix: UpdateDialog centering + padding
+
+Reported on Suzy's 125% display: the **Update** dialog (opened from Settings → Update) was *quite large and full of unused padding*, and the status/detail text wasn't centered on her screen even though it was on a 100% display. Root cause was a familiar one for this codebase — every horizontally-positioned control in the dialog used a hand-tuned `Location.X` literal, and those literals had drifted off-center as the form size and button widths evolved over the v2.x/v3.x history. The status label sat at `Location(20, 20)` with `Size(370, 24)` inside `ClientSize(420, 180)` — left margin 20, right margin 30, so the label was off-center by 10 design-px (≈ 12 px at 125% DPI, visible to the eye). The two-button row at `(166, 112)` + `(296, 112)` ended up 11 px right of form center; the single-Cancel mode at `(170, 112)` was 15 px right. And the dialog had ≈ 86 px of dead vertical padding around 94 px of content (~48% empty space) — the "unused padding" complaint.
+
+### What's underneath
+
+- **`UpdateDialog.cs · ctor`** — every Location.X is now derived from a new `CenterX(int controlWidth)` helper that computes `(ClientSize.Width - controlWidth) / 2` in design-px. Labels, progress bar, and the button row all center automatically off the form's current size, so future ClientSize tweaks don't need to recompute each Location manually.
+- **`UpdateDialog.cs · CenterX`** — new helper method, instance scope. Math runs in design-px (ClientSize.Width is the design-baseline value set before any Controls.Add); AutoScaleMode.Dpi scales the returned Point at realization.
+- **`UpdateDialog.cs · _btnW / _btnRowY`** — two new class-level constants (100 design-px, 108 design-px) so the three single-button-mode handlers (`ShowVersionComparison`, `ShowError`, `ShowWingetNotice`) can re-center `_btnCancel` via `CenterX(_btnW)` instead of duplicating literal Point values. Pre-v3.2.4 each handler had a hardcoded `new Point(170, 112)` — a stale mid-point for the old 420-wide form's 110-wide button, off-center by 15 px and frozen against future geometry changes.
+- **`UpdateDialog.cs · ClientSize`** — tightened from `(420, 180)` to `(360, 154)`. Vertical content (status 24 + detail 20 + progress 16 + button row 30) now sits inside ~60 px of padding (16 top, 16 bottom, 6/12/20 between sections) instead of the old ~86 px (~37% of the dialog was empty space).
+- **`UpdateDialog.cs`** — button widths tightened 110 → 100; "Upgrade Now" measures ~80 px text, leaves 20 px chrome margin which fits comfortably at 200% DPI. Progress bar height tightened 18 → 16 with matching updates in the marquee timer tick, the DownloadFileAsync progress writer, and ShowVersionComparison's progress-reset.
+- **`SyncthingPause.csproj`** — 3.2.3 → 3.2.4.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file publish deployed to `C:\Users\nate\proggy\Tools\syncthingpause\` (relaunched, PID 45084 at deploy time), and dropped into the `ToSuzy` Syncthing share for propagation to the `sendmorepickles` device. Visual smoke at 100% pending on Asus; 125% smoke pending on Suzy once the sync lands.
+
 ## v3.2.3 — 2026-05-18
 
 ### Fix: AddSectionHeader divider mixed-DPI math + cleanups
