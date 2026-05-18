@@ -563,4 +563,65 @@ public class AppConfigTests
     [TestMethod]
     public void AllowUrl_Malformed_Rejected() =>
         Assert.IsFalse(UpdateDialog.IsAllowedReleaseAssetUrl("not a url"));
+
+    // ── ThemeMode (v3.2.0) ────────────────────────────────────────────────
+
+    [TestMethod]
+    public void ThemeMode_DefaultIsDark_OnFirstRun()
+    {
+        // Existing users had no theme pin before v3.2.0; default must be Dark
+        // so the v3.1.x → v3.2.0 upgrade preserves the visual experience.
+        var config = new AppConfig(_tempDir);
+        Assert.AreEqual("Dark", config.ThemeMode);
+    }
+
+    [TestMethod]
+    public void ThemeMode_RoundTripsDark()
+    {
+        var written = new AppConfig(_tempDir) { ThemeMode = "Dark" };
+        written.Save();
+        var loaded = new AppConfig(_tempDir);
+        Assert.AreEqual("Dark", loaded.ThemeMode);
+    }
+
+    [TestMethod]
+    public void ThemeMode_RoundTripsLight()
+    {
+        // Cover the OTHER value — a one-character bug producing "Lite" instead
+        // of "Light" would pass the Dark-only round-trip test.
+        var written = new AppConfig(_tempDir) { ThemeMode = "Light" };
+        written.Save();
+        var loaded = new AppConfig(_tempDir);
+        Assert.AreEqual("Light", loaded.ThemeMode);
+    }
+
+    [TestMethod]
+    public void ThemeMode_UnknownValue_KeepsDefault()
+    {
+        // Hand-edited typo (e.g. "Lite", "Mauve") must NOT silently clobber to
+        // a sentinel — keep the current default so a misspelling doesn't reset
+        // the user's other settings on next Save.
+        var iniPath = Path.Combine(_tempDir, "SyncthingPause.ini");
+        File.WriteAllText(iniPath,
+            "[Settings]\nThemeMode=Mauve\n",
+            new UTF8Encoding(false));
+        var cfg = new AppConfig(_tempDir);
+        Assert.AreEqual("Dark", cfg.ThemeMode);
+    }
+
+    [TestMethod]
+    public void ThemeMode_CaseInsensitiveParse_StoresCanonical()
+    {
+        // Hand-edited "themeMode=light" must parse, and must STORE as "Light"
+        // so SettingsForm's case-sensitive IndexOf finds the canonical form.
+        // A naive equality check that's case-sensitive on the value would
+        // silently fall through to the default — bug class the verifier
+        // swarm caught in the canonical template.
+        var iniPath = Path.Combine(_tempDir, "SyncthingPause.ini");
+        File.WriteAllText(iniPath,
+            "[Settings]\nThemeMode=lIgHt\n",
+            new UTF8Encoding(false));
+        var cfg = new AppConfig(_tempDir);
+        Assert.AreEqual("Light", cfg.ThemeMode);
+    }
 }

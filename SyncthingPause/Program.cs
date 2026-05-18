@@ -26,6 +26,17 @@ internal static class Program
         // window has closed and no installs are still running v2.x.
         KillRenamePredecessor();
 
+        bool isAfterUpdate = args.Contains("--after-update");
+        // v3.2.0 theme toggle: when the user picks Light/Dark and saves, the
+        // dying instance spawns a replacement with this flag. The mutex held
+        // by the dying instance might not yet be released, so we retry the
+        // single-instance wait for ~5 s instead of giving up on the first hit.
+        // Same pattern as --after-update would use if the rename-bridge ever
+        // shipped that flag (it doesn't today — included pre-emptively for
+        // parity).
+        bool isAfterThemeRestart = args.Contains("--after-theme-restart");
+        bool isRelaunch = isAfterUpdate || isAfterThemeRestart;
+
         using var mutex = new Mutex(true, "SyncthingPause_SingleInstance", out bool createdNew);
         if (!createdNew)
         {
@@ -45,13 +56,23 @@ internal static class Program
                     catch { theirSession = -1; }
                     if (theirSession != mySession) continue;
 
+                    // On a theme-restart relaunch the dying instance is exiting
+                    // normally — don't Kill it. The 5 s mutex wait below covers
+                    // the brief window where its WinForms shutdown finishes.
+                    if (isAfterThemeRestart) continue;
+
                     try { p.Kill(); KilledPreviousInstance = true; } catch { /* already exiting */ }
                 }
             }
 
             try
             {
-                if (!mutex.WaitOne(3000))
+                // 5 s on relaunch paths (theme/update); 3 s otherwise. The
+                // dying-instance teardown after Application.Exit takes ~500 ms-
+                // 2 s typically; 5 s is comfortable headroom without being long
+                // enough that the user notices the gap.
+                int waitMs = isRelaunch ? 5000 : 3000;
+                if (!mutex.WaitOne(waitMs))
                     return;
             }
             catch (AbandonedMutexException)
@@ -59,8 +80,6 @@ internal static class Program
                 // Old process was killed before releasing the mutex — we now own it
             }
         }
-
-        bool isAfterUpdate = args.Contains("--after-update");
 
         // Crash-sentinel check: if a sentinel persists and this is NOT the immediate
         // post-update boot (where the sentinel is expected to still be there), the
@@ -87,8 +106,46 @@ internal static class Program
 
         if (isAfterUpdate)
             UpdateDialog.ShowUpdateToast();
+        if (isAfterThemeRestart)
+            ShowDelayedThemeOsd();
 
         Application.Run(new TrayApplicationContext());
+    }
+
+    /// <summary>
+    /// Fire a brief OSD ~800 ms after launch confirming the theme switch took
+    /// effect. The timer-tick approach defers the show until after the message
+    /// loop is running (calling OsdToolTip.ShowMessage directly from Main is
+    /// too early — the form's handle isn't created yet). Matches the
+    /// <see cref="UpdateDialog.ShowUpdateToast"/> deferral pattern.
+    /// </summary>
+    private static void ShowDelayedThemeOsd()
+    {
+        // Register with ApplicationExit so a fast Exit (user right-clicks
+        // tray → Exit within the 800 ms window) disposes the timer instead
+        // of leaking its native HWND. Without this, the Tick never fires
+        // and the timer's handle lives until the GC finalizer runs — on a
+        // 24/7 app, that's a small but real GDI/handle leak per launch.
+        var delay = new System.Windows.Forms.Timer { Interval = 800 };
+        EventHandler? exitHandler = null;
+        delay.Tick += (_, _) =>
+        {
+            delay.Stop();
+            if (exitHandler != null) Application.ApplicationExit -= exitHandler;
+            delay.Dispose();
+            // ShowToast reuses UpdateDialog's existing topmost ToastWindow so
+            // we get the same visual treatment as "Updated to X" — consistent
+            // post-launch confirmation surface across both kinds of relaunch.
+            UpdateDialog.ShowToast($"Theme applied — now {(Theme.IsDark ? "Dark" : "Light")}");
+        };
+        exitHandler = (_, _) =>
+        {
+            delay.Stop();
+            if (exitHandler != null) Application.ApplicationExit -= exitHandler;
+            delay.Dispose();
+        };
+        Application.ApplicationExit += exitHandler;
+        delay.Start();
     }
 
     /// <summary>

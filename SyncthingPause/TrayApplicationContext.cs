@@ -178,9 +178,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     // v2.3.0 menu coloring (Catppuccin-Mocha-aligned, readable on the dark bg).
     // Applied via Item.Tag = Color, honored by DarkMenuRenderer.OnRenderItemText.
-    private static readonly Color HeaderOnlineColor = Color.FromArgb(0xA6, 0xE3, 0xA1);
-    private static readonly Color HeaderOfflineColor = Color.FromArgb(0xF3, 0x8B, 0xA8);
-    private static readonly Color PausedDimColor = Color.FromArgb(0x80, 0x80, 0x90);
+    // Theme-aware accent colors for device-name menu headers. Property
+    // getters (not static readonly fields) so they evaluate on every read —
+    // necessary because TrayApplicationContext's class load can precede
+    // Theme.Initialize() in some race scenarios (the field-init for the
+    // type runs before its own constructor body). Property reads are lazy
+    // and always see the post-Initialize value. AccentGreen = "Online",
+    // AccentRed = "Offline", FgDisabled = "Paused (greyed out)".
+    private static Color HeaderOnlineColor => Theme.AccentGreen;
+    private static Color HeaderOfflineColor => Theme.AccentRed;
+    private static Color PausedDimColor => Theme.FgDisabled;
 
     // Cached tooltip state — only rebuild string when components change
     private string _lastTipStatus = string.Empty;
@@ -218,6 +225,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _config = new AppConfig(appDir);
         TrayLog.Enable(_config.DiagnosticLogging);
         TrayLog.Info($"SyncthingPause v{AppConfig.Version} starting. Portable={_config.IsPortable}, FirstRun={_config.IsFirstRun}.");
+
+        // LOAD-BEARING ORDER: Theme.Initialize MUST run before any class with a
+        // static GDI cache reading Theme.* loads. Below this line, OsdToolTip,
+        // DarkMenuRenderer, and the dialog forms capture the active palette at
+        // first class load. Putting Theme.Initialize anywhere later (e.g. after
+        // the renderer construction) leaves the menu permanently dark even when
+        // the user picked Light. See Theme.cs docstring.
+        Theme.Initialize(Theme.ResolveIsDark(_config.ThemeMode));
+        DarkRenderer = new DarkMenuRenderer();
+
         _api = new SyncthingApi(_config);
 
         // Load icons from embedded resources
@@ -690,7 +707,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     // --- Menu Building ---
 
-    private static readonly DarkMenuRenderer DarkRenderer = new();
+    // Instance (NOT static field-init) so the constructor body's
+    // Theme.Initialize() call can run BEFORE DarkMenuRenderer's class load
+    // captures Theme.* into its static GDI cache. See Theme.cs docstring
+    // for the load-bearing ordering contract.
+    private readonly DarkMenuRenderer DarkRenderer;
 
     private void BuildMenu()
     {

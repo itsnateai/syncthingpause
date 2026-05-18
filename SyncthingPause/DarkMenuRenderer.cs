@@ -1,24 +1,35 @@
 namespace SyncthingPause;
 
 /// <summary>
-/// Custom ToolStripRenderer that applies the dark theme (matching Settings/Help forms)
-/// to the tray context menu. Brushes and pens are cached as static fields to avoid
-/// GDI object churn on every paint call (important for 24/7 operation).
+/// Custom ToolStripRenderer that applies the active theme (Dark or Light, per
+/// the user's <c>ThemeMode</c> setting) to the tray context menu. Brushes and
+/// pens are cached as static fields to avoid GDI object churn on every paint
+/// call (important for 24/7 operation).
+///
+/// Restart-to-apply: these <c>static readonly</c> fields capture <see cref="Theme"/>
+/// values at first class load. The <c>Theme.Initialize()</c> call in
+/// <c>TrayApplicationContext</c>'s constructor body must precede the first
+/// construction of this renderer — see <c>Theme.cs</c> docstring.
+///
+/// Class name kept as "DarkMenuRenderer" through the dual-theme migration to
+/// avoid sprawling renames across the codebase; behaviour is theme-aware.
 /// </summary>
 internal sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
 {
-    private static readonly Color MenuBg = Color.FromArgb(0x1E, 0x1E, 0x2E);
-    private static readonly Color MenuFg = Color.FromArgb(0xCD, 0xD6, 0xF3);
-    private static readonly Color HighlightBg = Color.FromArgb(0x35, 0x35, 0x50);
-    private static readonly Color SeparatorColor = Color.FromArgb(0x40, 0x40, 0x50);
+    private static readonly Color MenuBg = Theme.Bg;
+    private static readonly Color MenuFg = Theme.Fg;
+    private static readonly Color MenuFgDisabled = Theme.FgDisabled;
+    private static readonly Color HighlightBg = Theme.HighlightBg;
+    private static readonly Color SeparatorColor = Theme.Divider;
 
-    // Cached GDI objects — colors are fixed, so these live for the process lifetime
+    // Cached GDI objects — colors are fixed for the process lifetime once
+    // Theme.Initialize has run before this class first loads.
     private static readonly SolidBrush BgBrush = new(MenuBg);
     private static readonly SolidBrush HighlightBrush = new(HighlightBg);
     private static readonly Pen SeparatorPen = new(SeparatorColor);
     private static readonly Pen BorderPen = new(SeparatorColor);
 
-    public DarkMenuRenderer() : base(new DarkColorTable()) { }
+    public DarkMenuRenderer() : base(new ThemedColorTable()) { }
 
     protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
     {
@@ -44,7 +55,7 @@ internal sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
                 TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont, e.TextRectangle, tagColor, e.TextFormat);
             return;
         }
-        e.TextColor = e.Item.Enabled ? MenuFg : Color.FromArgb(0x60, 0x60, 0x70);
+        e.TextColor = e.Item.Enabled ? MenuFg : MenuFgDisabled;
         base.OnRenderItemText(e);
     }
 
@@ -68,11 +79,12 @@ internal sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
     {
-        // Suppress default image margin rendering (white strip on left)
+        // Suppress default image margin rendering (white strip on left in light
+        // Windows themes; visible faint band in dark themes too).
         e.Graphics.FillRectangle(BgBrush, e.AffectedBounds);
     }
 
-    private sealed class DarkColorTable : ProfessionalColorTable
+    private sealed class ThemedColorTable : ProfessionalColorTable
     {
         public override Color MenuBorder => SeparatorColor;
         public override Color MenuItemBorder => Color.Transparent;

@@ -37,6 +37,20 @@ internal sealed class AppConfig
     /// </summary>
     public bool DiagnosticLogging { get; set; }
 
+    /// <summary>
+    /// Window-chrome theme — "Dark" (default, Catppuccin Mocha) or "Light"
+    /// (v2.1.x classic — pure white BG, near-black text, brand-blue
+    /// #2255AA headers, cornsilk #FFF8DC focus tint). Restart-to-apply by
+    /// design — the GDI brush/pen caches in DarkMenuRenderer / OsdToolTip /
+    /// the dialog forms capture <see cref="Theme"/>'s values at first class
+    /// load and can't be invalidated without a process restart. The Save path
+    /// in SettingsForm spawns a replacement process to make this seamless.
+    ///
+    /// Tray icons follow the OS theme regardless of this pin — the user pin
+    /// only affects window chrome.
+    /// </summary>
+    public string ThemeMode { get; set; } = "Dark";
+
     public string SettingsFilePath { get; }
     public bool IsPortable { get; }
     public bool IsFirstRun { get; }
@@ -200,6 +214,19 @@ internal sealed class AppConfig
         StopOnExit = GetBool(settings, "StopOnExit", false);
         DiagnosticLogging = GetBool(settings, "DiagnosticLogging", false);
 
+        // Theme — case-insensitive value with canonical-case storage so a
+        // hand-edited "themeMode=dark" works. Unknown values keep the current
+        // default rather than silently clobbering to a sentinel.
+        var themeRaw = GetString(settings, "ThemeMode", string.Empty);
+        if (string.Equals(themeRaw, "Dark", StringComparison.OrdinalIgnoreCase))
+            ThemeMode = "Dark";
+        else if (string.Equals(themeRaw, "Light", StringComparison.OrdinalIgnoreCase))
+            ThemeMode = "Light";
+        else if (!string.IsNullOrEmpty(themeRaw))
+        {
+            TrayLog.Warn($"AppConfig: unknown ThemeMode value '{themeRaw}' — keeping '{ThemeMode}'.");
+        }
+
         var exe = GetString(settings, "SyncExe", string.Empty);
         if (!string.IsNullOrEmpty(exe))
             SyncExe = ValidateSyncExe(exe) ?? SyncExe;
@@ -230,7 +257,7 @@ internal sealed class AppConfig
     public void MarkAllConfigured()
     {
         string[] allKeys = ["DblClickAction", "MiddleClickAction", "RunOnStartup", "StartBrowser", "ApiKey",
-            "SyncExe", "WebUI", "StartupDelay", "NetworkAutoPause", "AutoCheckUpdates", "SoundNotifications", "StopOnExit", "DiagnosticLogging"];
+            "SyncExe", "WebUI", "StartupDelay", "NetworkAutoPause", "AutoCheckUpdates", "SoundNotifications", "StopOnExit", "DiagnosticLogging", "ThemeMode"];
         foreach (var key in allKeys)
             _configuredKeys.Add(key);
     }
@@ -255,6 +282,7 @@ internal sealed class AppConfig
         sb.AppendLine($"SoundNotifications={BoolToStr(SoundNotifications)}");
         sb.AppendLine($"StopOnExit={BoolToStr(StopOnExit)}");
         sb.AppendLine($"DiagnosticLogging={BoolToStr(DiagnosticLogging)}");
+        sb.AppendLine($"ThemeMode={ThemeMode}");
 
         try
         {

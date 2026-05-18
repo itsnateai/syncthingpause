@@ -4,6 +4,39 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.0 — 2026-05-17
+
+### Feature: user-selectable Dark / Light theme
+
+SyncthingPause shipped dark-only since the v2.0.0 AHK→C# port — a Catppuccin Mocha palette baked into every dialog, menu, and OSD. v3.2.0 adds a Light palette (v2.1.x classic — pure white BG, near-black text, brand-blue `#2255AA` headers, cornsilk `#FFF8DC` focus tint) and a toggle to pick between them in Settings → Discovery. The toggle lives on two lines in the right column of that section: a "Theme:" label above two "Dark" / "Light" radio buttons. Persists via the existing `SyncthingPause.ini` (`ThemeMode=Dark` / `ThemeMode=Light`).
+
+### Restart-to-apply, but seamless
+
+The theme switch fires a fresh process when you click **Save** — same exe, same install location, same single-instance mutex. Within ~1 second the old window disappears and the new one comes up in the picked theme, with a brief toast confirming. The dying instance and the replacement coordinate via the existing single-instance mutex (5 s retry window on `--after-theme-restart`); no state is lost across the swap because the INI is written before the relaunch fires.
+
+Why restart and not live-swap: the GDI brush/pen caches in the tray context menu renderer, the OSD form, and the various dialog forms are `static readonly` field initializers that capture the active palette at first class load. Invalidating them mid-process would mean re-creating every dialog instance and flushing every cached brush across half a dozen classes — a much bigger surface for a tiny user-visible win. Restart keeps the GDI cache contract honest.
+
+### What's underneath
+
+- **`Theme.cs`** (new, ~150 LOC) — dual palette static class with `Initialize` / `ResolveIsDark` / `IsSystemLightTheme` and 13 colour accessors (Bg, Fg, FgDisabled, Dim, HighlightBg, EditBg, Divider, AccentBlue, AccentGreen, AccentRed, AccentWarn, OsdBorder, ComboSelectedBg). Light palette is v2.1.x classic (pure white `#FFFFFF` BG, near-black `#1E1E1E` text, secondary text `#555555` for ~7.5:1 contrast / WCAG AAA, divider `#C8C8C8`, brand-blue `#2255AA` headers, forest-green `#2E7D32` online-device header, deep-red `#C62828` offline-device + warning, cornsilk `#FFF8DC` for hover + OSD pill bg, faint off-white `#F8F8F8` for input inset). Selected over Catppuccin Latte (the template's Variant A) — Latte's cool tint read as eye-strain at dialog scale on first look; v2.1.x classic mirrors the pre-port feel pixel-for-pixel on the slots that matter.
+- **`AppConfig.cs`** — new `ThemeMode` property + case-insensitive Load + canonical-case storage so a hand-edited `themeMode=light` parses and stores as `Light`. Unknown values (typos, future "System" tier) keep the current default rather than silently clobbering.
+- **`SettingsForm.cs`** — two radio buttons in the Discovery section's right column, label on the row above. Save handler snapshots the prior `ThemeMode`, detects change, and spawns the replacement process with `--after-theme-restart` after the existing discovery PATCH / RunOnStartup paths have kicked off.
+- **`Program.cs`** — parses `--after-theme-restart`, extends the single-instance mutex retry from 3 s to 5 s on relaunch paths (covers the dying-instance WinForms teardown window), suppresses the same-name Kill-on-mutex-clash for relaunch (the dying instance is exiting normally, killing it would race the INI write), and fires a delayed toast confirmation ~800 ms post-launch.
+- **`TrayApplicationContext.cs`** — `Theme.Initialize(...)` runs immediately after `_config = new AppConfig(...)` and before the `DarkRenderer = new DarkMenuRenderer()` body-assign. The old `static readonly DarkMenuRenderer DarkRenderer = new()` field-init was demoted to instance + ctor-body so it can't fire before Theme is set. Device-name menu header colors (Online green / Offline red / Paused grey) moved from `static readonly Color` fields to property getters that route through `Theme.*` — properties evaluate lazily so they always see the post-Initialize palette.
+- **`DarkMenuRenderer.cs`, `OsdToolTip.cs`, `HelpForm.cs`, `UpdateDialog.cs`, `SyncthingUpdateDialog.cs`** — every `private static readonly Color FooColor = Color.FromArgb(...)` literal replaced with `= Theme.Foo`. These classes load lazily (first dialog open / first toast / first menu build), well after `Theme.Initialize` runs in the tray context's constructor body. The class name `DarkMenuRenderer` was kept through the dual-theme migration to avoid a sprawling rename — the class is theme-aware regardless.
+
+### Verifier coverage
+
+- 92 tests pass (87 prior + 5 new ThemeMode tests: defaults-to-Dark on first-run, round-trips Dark, round-trips Light, unknown-value keeps default, case-insensitive parse stores canonical). Build: 0 warnings, 0 errors.
+- Tested locally on Win 11 Pro 26H2 at 100 % display scale.
+- Pattern lifted from the canonical `_templates/snippets/csharp/winforms-user-selectable-theme.md`, which documents both Variant A (Catppuccin Latte) and Variant B (v2.1.x classic, what we shipped) — the template absorbed two rounds × 6 verifier agents at the origin app (CapsNumTray v2.4.6). v3.2.0 is the second adopter of the v2.1.x classic variant after MWBToggle v2.5.18.
+
+### Migration notes
+
+- Existing users have no `ThemeMode` key in their INI; the default `Dark` matches the visual experience they had on v3.1.x — no surprise theme swap on first launch.
+- The Settings dialog's Discovery section gains a right column; the form width is unchanged (410 px), and the new controls sit in the previously-empty space alongside the Global / Local / NAT Traversal checkboxes.
+- WinForms' OS-owned dropdown panel for ComboBox still paints with system colors regardless of our theme pin (white BG / black text on Win 11). This is a known WinForms limit; owner-drawing the dropdown panel would add ~80 LOC for a minor cosmetic win — deferred. The closed dropdown (which we own-draw) does honor the theme.
+
 ## v3.1.0 — 2026-05-16
 
 ### Feature: explicit one-click upgrade path for the Syncthing daemon

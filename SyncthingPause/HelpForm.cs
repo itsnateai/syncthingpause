@@ -13,11 +13,14 @@ internal sealed class HelpForm : Form
     private readonly List<Font> _fonts = new();
     private bool _disposed;
 
-    private static readonly Color BgColor = Color.FromArgb(0x1E, 0x1E, 0x2E);
-    private static readonly Color FgColor = Color.FromArgb(0xCD, 0xD6, 0xF3);
-    private static readonly Color DividerColor = Color.FromArgb(0x40, 0x40, 0x50);
-    // Catppuccin Mocha "blue" — reads clearly as an accent on the 0x1E1E2E base.
-    private static readonly Color HeaderColor = Color.FromArgb(0x89, 0xB4, 0xFA);
+    // Theme-aware caches — captured at first class load. Theme.Initialize runs
+    // earlier in TrayApplicationContext's ctor body, so by the time the user
+    // opens Help (which triggers this class load) the right palette is set.
+    private static readonly Color BgColor = Theme.Bg;
+    private static readonly Color FgColor = Theme.Fg;
+    private static readonly Color DividerColor = Theme.Divider;
+    // Accent — Catppuccin Mocha "blue" #89B4FA in dark; brand-blue #2255AA in light (v2.1.x classic).
+    private static readonly Color HeaderColor = Theme.AccentBlue;
 
     private static readonly string s_helpText = @"Syncthing, hidden in the tray. One-click pause, rescan, and folder access without opening a browser.
 
@@ -52,6 +55,8 @@ Paths — Syncthing exe (auto-discovered) and Web UI URL (localhost only).
 API Key — required for status, pause/resume, discovery. Get it from the Web UI: Actions → Settings → API Key. Field is masked; click the eye to reveal.
 
 Discovery — Global (public tracker) and Local (LAN).
+
+Theme — Dark or Light, in the right column of the Discovery section. Picks the window-chrome palette for Settings, OSDs, dialogs, and the tray menu (the tray ICONS still follow the OS theme so they read against either taskbar). Restart-on-Save is automatic — the new look comes up in ~1 s.
 
 Updates — daily poll for new Syncthing releases.
 

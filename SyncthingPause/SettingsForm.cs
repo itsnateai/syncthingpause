@@ -38,6 +38,11 @@ internal sealed class SettingsForm : Form
     private int _discoveryRetryCount;
     private CheckBox _cbSoundNotify = null!;
     private CheckBox _cbStopOnExit = null!;
+    // Theme toggle — two radios in the Discovery section's right column (label
+    // on line 1, radios on line 2). RadioButton is a "toggle box" that reads
+    // both options at a glance; persisted as `Dark` or `Light` in AppConfig.
+    private RadioButton _rbThemeDark = null!;
+    private RadioButton _rbThemeLight = null!;
 
     private readonly Font _boldFont;
     private readonly Font _normalFont;
@@ -47,12 +52,16 @@ internal sealed class SettingsForm : Form
     private readonly Font _subFont;
     private readonly Font _iconFont;
 
-    private static readonly Color BgColor = Color.FromArgb(0x1E, 0x1E, 0x2E);
-    private static readonly Color FgColor = Color.FromArgb(0xCD, 0xD6, 0xF3);
-    private static readonly Color DimColor = Color.FromArgb(0xA0, 0xA0, 0xC0);
-    private static readonly Color DividerColor = Color.FromArgb(0x40, 0x40, 0x50);
-    private static readonly Color EditBgColor = Color.FromArgb(0x2A, 0x2A, 0x3E);
-    private static readonly Color ComboSelectedBgColor = Color.FromArgb(0x35, 0x35, 0x50);
+    // Theme-aware static caches — SettingsForm class loads when the user opens
+    // Settings (well after Theme.Initialize ran in TrayApplicationContext's ctor),
+    // so these capture the active palette correctly.
+    private static readonly Color BgColor = Theme.Bg;
+    private static readonly Color FgColor = Theme.Fg;
+    private static readonly Color DimColor = Theme.Dim;
+    private static readonly Color DividerColor = Theme.Divider;
+    private static readonly Color EditBgColor = Theme.EditBg;
+    private static readonly Color ComboSelectedBgColor = Theme.ComboSelectedBg;
+    private static readonly Color WarnLabelColor = Theme.FgDisabled;
 
     // CLAUDE.md: cache GDI in paint paths — combo item draw fires per item per paint.
     private static readonly SolidBrush ComboBgBrush = new(EditBgColor);
@@ -145,7 +154,7 @@ internal sealed class SettingsForm : Form
         if (_config.IsPortable)
         {
             _cbRunOnStartup.Enabled = false;
-            AddLabel("(not available in portable mode)", 36, y + 18, 300, _subFont, Color.FromArgb(0x80, 0x80, 0x90));
+            AddLabel("(not available in portable mode)", 36, y + 18, 300, _subFont, WarnLabelColor);
             y += 16;
         }
         y += 26;
@@ -293,60 +302,102 @@ internal sealed class SettingsForm : Form
     {
         AddSectionHeader("Discovery", 16, ref y, sw);
 
-        bool curGlobal = false, curLocal = false, curRelay = false;
-        bool discoveryRead = false;
-        int discoveryStatus = -1;
-        // Fast probe first — a full HTTP GET against a dead port burns the HttpClient
-        // timeout (5s) on the UI thread, which is why this dialog used to take 6s to
-        // appear when Syncthing was off.
-        if (!string.IsNullOrEmpty(_config.ApiKey) && _api.IsReachable())
-        {
-            try
-            {
-                var (status, body) = _api.Get("/rest/config/options", timeoutMs: 1500);
-                discoveryStatus = status;
-                if (status == 200)
-                {
-                    curGlobal = ParseJsonBool(body, "globalAnnounceEnabled", false);
-                    curLocal = ParseJsonBool(body, "localAnnounceEnabled", false);
-                    curRelay = ParseJsonBool(body, "relaysEnabled", false);
-                    discoveryRead = true;
-                }
-            }
-            catch (Exception ex)
-            {
-                TrayLog.Warn("Discovery read failed: " + ex.Message);
-            }
-        }
+        // The HTTP probe used to run synchronously here — up to 1500 ms on the
+        // UI thread when Syncthing was up but slow, on top of the 300 ms-per-
+        // address IsReachable TCP probe. Total perceived lag on Settings open
+        // ranged from ~100 ms (Syncthing snappy) to ~2 s (slow API + IPv6 race
+        // on a hostname that resolved to [::1, 127.0.0.1] with v4-only listen).
+        // Now the dialog appears immediately with the checkboxes disabled; the
+        // probe runs on a pool thread via StartDiscoveryRetryTimer below and
+        // populates values within ~200-500 ms when Syncthing is responsive.
+        // Synchronous IsReachable is still acceptable (300 ms × N addresses,
+        // typically <50 ms when Syncthing is up) and lets us pick the right
+        // initial warn message without waiting for the HTTP call.
+        bool apiKeyEmpty = string.IsNullOrEmpty(_config.ApiKey);
+        bool reachable = !apiKeyEmpty && _api.IsReachable();
 
-        _cbGlobal = AddCheckBox("Global Discovery", 16, y, curGlobal);
+        // Capture the y-coordinates of the first two Discovery rows so the
+        // Theme: label + radio pair line up exactly with them on the right.
+        // The Theme control is hosted in the Discovery section per user request
+        // — visually grouped with other "appearance vs network" toggles, two
+        // lines tall on the right side of the section.
+        int themeLabelY = y;
+        _cbGlobal = AddCheckBox("Global Discovery", 16, y, false);
+        _cbGlobal.Width = 200;
         y += 24;
-        _cbLocal = AddCheckBox("Local Discovery", 16, y, curLocal);
+        int themeRadioY = y;
+        _cbLocal = AddCheckBox("Local Discovery", 16, y, false);
+        _cbLocal.Width = 200;
         y += 24;
-        _cbRelay = AddCheckBox("NAT Traversal (Relaying)", 16, y, curRelay);
+        _cbRelay = AddCheckBox("NAT Traversal (Relaying)", 16, y, false);
         y += 24;
 
-        // If the API read failed, the three boxes above do NOT reflect Syncthing's
-        // real state. Disable + warn so Save doesn't silently destroy the user's
-        // existing discovery config by PATCHing a default-false payload.
-        _discoveryReadOk = discoveryRead;
-        if (!discoveryRead)
+        // ── Theme toggle (right column, two lines) ─────────────────────────
+        // Line 1 (themeLabelY): "Theme:" header. Line 2 (themeRadioY): two
+        // radio buttons "Dark" / "Light" side by side. Persists to AppConfig
+        // and applies on next launch — the SettingsForm Save path spawns a
+        // replacement process so this is seamless. See Theme.cs for the
+        // restart-to-apply rationale (GDI brush/pen caches captured at first
+        // class load can't be invalidated without a process restart).
+        const int ThemeColX = 240;
+        AddLabel("Theme:", ThemeColX, themeLabelY + 2, 0, _normalFont, DimColor);
+
+        bool currentlyDark = string.Equals(_config.ThemeMode, "Dark",
+            StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(_config.ThemeMode);
+        _rbThemeDark = new RadioButton
         {
-            _cbGlobal.Enabled = _cbLocal.Enabled = _cbRelay.Enabled = false;
-            string message;
-            if (string.IsNullOrEmpty(_config.ApiKey))
-                message = "(set API Key above to manage discovery)";
-            else if (discoveryStatus == 401 || discoveryStatus == 403)
-                message = "(API Key rejected — check the key above)";
-            else
-                message = "(could not read current state — API unreachable)";
-            _discoveryWarnLabel = AddLabel(message, 36, y, 320, _subFont, Color.FromArgb(0x80, 0x80, 0x90));
+            Text = "Dark",
+            Font = _normalFont,
+            ForeColor = FgColor,
+            BackColor = BgColor,
+            Location = new Point(ThemeColX, themeRadioY),
+            Width = 64,
+            Checked = currentlyDark,
+            AccessibleName = "Dark theme",
+        };
+        _rbThemeLight = new RadioButton
+        {
+            Text = "Light",
+            Font = _normalFont,
+            ForeColor = FgColor,
+            BackColor = BgColor,
+            Location = new Point(ThemeColX + 64, themeRadioY),
+            Width = 64,
+            Checked = !currentlyDark,
+            AccessibleName = "Light theme",
+        };
+        Controls.Add(_rbThemeDark);
+        Controls.Add(_rbThemeLight);
+
+        // The three discovery boxes start DISABLED with `_discoveryReadOk = false`.
+        // ApplySettings gates the discovery PATCH on _discoveryReadOk so a Save
+        // before the async probe lands won't silently clobber Syncthing's existing
+        // state with default-false. The probe enables the boxes + sets the flag
+        // atomically (SuspendLayout / ResumeLayout) on success.
+        _cbGlobal.Enabled = _cbLocal.Enabled = _cbRelay.Enabled = false;
+        _discoveryReadOk = false;
+
+        if (apiKeyEmpty)
+        {
+            // No key → can't probe and can't recover by retry. Static label.
+            _discoveryWarnLabel = AddLabel("(set API Key above to manage discovery)", 36, y, 320, _subFont, WarnLabelColor);
             y += 18;
-
-            // Auto-refresh loop — polls /rest/config/options every 2 s while the dialog
-            // is open. Covers the fresh-cold-start window where Syncthing takes 5-15 s
-            // to bind its REST port after the tray launched it. Without this, the user
-            // has to manually close + reopen Settings to pick up discovery values.
+        }
+        else if (!reachable)
+        {
+            // Syncthing not listening on the WebUI port. Show the warn and arm
+            // the retry timer — when it comes up, the probe will swap the label
+            // out and enable the boxes.
+            _discoveryWarnLabel = AddLabel("(could not read current state — API unreachable)", 36, y, 320, _subFont, WarnLabelColor);
+            y += 18;
+            StartDiscoveryRetryTimer();
+        }
+        else
+        {
+            // Reachable. Kick off the async probe — the dialog is already
+            // visible by the time it lands. No warn label initially; the retry
+            // timer's timeout path (60 s with no successful probe) will
+            // surface a recovery hint via the warn label it lazily creates.
             StartDiscoveryRetryTimer();
         }
         y += 6;
@@ -360,89 +411,115 @@ internal sealed class SettingsForm : Form
 
         _discoveryRetryCount = 0;
         _discoveryRetryTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-        _discoveryRetryTimer.Tick += (_, _) =>
-        {
-            if (_disposed || IsDisposed) { _discoveryRetryTimer?.Stop(); return; }
+        _discoveryRetryTimer.Tick += (_, _) => OnDiscoveryRetryTick();
+        _discoveryRetryTimer.Start();
 
-            if (++_discoveryRetryCount > DiscoveryRetryCapTicks)
+        // Fire the first probe immediately rather than waiting 2 s for the
+        // initial Tick. The probe is fully async (pool thread + BeginInvoke
+        // back) so this doesn't reblock the UI; it just compresses the
+        // dialog-open-to-boxes-populated latency from ~2 s to ~200-500 ms
+        // for the common case where Syncthing is reachable and responsive.
+        RunDiscoveryProbeOnce();
+    }
+
+    private void OnDiscoveryRetryTick()
+    {
+        if (_disposed || IsDisposed) { _discoveryRetryTimer?.Stop(); return; }
+
+        if (++_discoveryRetryCount > DiscoveryRetryCapTicks)
+        {
+            _discoveryRetryTimer?.Stop();
+            _discoveryRetryTimer?.Dispose();
+            _discoveryRetryTimer = null;
+            // Lazy-create the warn label if the dialog opened in the
+            // reachable-at-start path (no initial label was created then).
+            // After 60 s of failures we owe the user some explanation
+            // beyond "boxes are mysteriously disabled."
+            if (_discoveryWarnLabel == null || _discoveryWarnLabel.IsDisposed)
             {
-                _discoveryRetryTimer?.Stop();
-                _discoveryRetryTimer?.Dispose();
-                _discoveryRetryTimer = null;
-                if (_discoveryWarnLabel != null && !_discoveryWarnLabel.IsDisposed)
-                {
-                    _discoveryWarnLabel.Text = "(Syncthing unreachable — reopen Settings to retry)";
-                }
+                _discoveryWarnLabel = AddLabel(
+                    "(Syncthing unreachable — reopen Settings to retry)",
+                    36, _cbRelay.Bottom + 4, 320, _subFont, WarnLabelColor);
+            }
+            else
+            {
+                _discoveryWarnLabel.Text = "(Syncthing unreachable — reopen Settings to retry)";
+            }
+            return;
+        }
+
+        RunDiscoveryProbeOnce();
+    }
+
+    /// <summary>
+    /// Fires a single discovery probe on a pool thread. On 200, marshals the
+    /// parsed values back to the UI under SuspendLayout, enables the boxes,
+    /// removes any warn label, and stops the retry timer. On any failure
+    /// (TCP probe miss, exception, non-200 status) it returns silently —
+    /// the retry timer (or the timeout branch in <see cref="OnDiscoveryRetryTick"/>)
+    /// handles surface. Extracted from the old inline Tick lambda so both
+    /// the initial probe and subsequent retries share one code path.
+    /// </summary>
+    private void RunDiscoveryProbeOnce()
+    {
+        _ = Task.Run(() =>
+        {
+            if (_disposed || IsDisposed) return;
+            if (!_api.IsReachable()) return;
+
+            int status;
+            string body;
+            try
+            {
+                (status, body) = _api.Get("/rest/config/options", timeoutMs: 1500);
+            }
+            catch (Exception ex)
+            {
+                TrayLog.Warn("Discovery probe failed: " + ex.Message);
                 return;
             }
+            if (status != 200) return;
 
-            // Offload the probe + HTTP call to a pool thread. Running them on the
-            // UI thread (300 ms IsReachable + up to 1500 ms HTTP) froze the dialog
-            // at exactly the worst moment: when Syncthing was transitioning from
-            // down to up, right as the user was looking at Settings. The UI mutation
-            // marshals back via BeginInvoke and runs under SuspendLayout so the
-            // three checkboxes + Enabled flips + warning-label removal repaint once
-            // instead of cascading.
-            _ = Task.Run(() =>
+            bool g = ParseJsonBool(body, "globalAnnounceEnabled", false);
+            bool l = ParseJsonBool(body, "localAnnounceEnabled", false);
+            bool r = ParseJsonBool(body, "relaysEnabled", false);
+
+            try
             {
-                if (_disposed || IsDisposed) return;
-                if (!_api.IsReachable()) return;
-
-                int status;
-                string body;
-                try
+                BeginInvoke((Action)(() =>
                 {
-                    (status, body) = _api.Get("/rest/config/options", timeoutMs: 1500);
-                }
-                catch (Exception ex)
-                {
-                    TrayLog.Warn("Discovery auto-refresh probe failed: " + ex.Message);
-                    return;
-                }
-                if (status != 200) return;
-
-                bool g = ParseJsonBool(body, "globalAnnounceEnabled", false);
-                bool l = ParseJsonBool(body, "localAnnounceEnabled", false);
-                bool r = ParseJsonBool(body, "relaysEnabled", false);
-
-                try
-                {
-                    BeginInvoke((Action)(() =>
+                    if (_disposed || IsDisposed) return;
+                    SuspendLayout();
+                    try
                     {
-                        if (_disposed || IsDisposed) return;
-                        SuspendLayout();
-                        try
-                        {
-                            _cbGlobal.Checked = g;
-                            _cbLocal.Checked = l;
-                            _cbRelay.Checked = r;
-                            _cbGlobal.Enabled = _cbLocal.Enabled = _cbRelay.Enabled = true;
-                            _discoveryReadOk = true;
+                        _cbGlobal.Checked = g;
+                        _cbLocal.Checked = l;
+                        _cbRelay.Checked = r;
+                        _cbGlobal.Enabled = _cbLocal.Enabled = _cbRelay.Enabled = true;
+                        _discoveryReadOk = true;
 
-                            if (_discoveryWarnLabel != null)
-                            {
-                                Controls.Remove(_discoveryWarnLabel);
-                                _discoveryWarnLabel.Dispose();
-                                _discoveryWarnLabel = null;
-                            }
-                        }
-                        finally
+                        if (_discoveryWarnLabel != null)
                         {
-                            ResumeLayout(false);
+                            Controls.Remove(_discoveryWarnLabel);
+                            _discoveryWarnLabel.Dispose();
+                            _discoveryWarnLabel = null;
                         }
-                        // Single deferred repaint instead of five mid-mutation ones.
-                        Invalidate(invalidateChildren: true);
+                    }
+                    finally
+                    {
+                        ResumeLayout(false);
+                    }
+                    // Single deferred repaint instead of cascading per-mutation ones.
+                    Invalidate(invalidateChildren: true);
 
-                        _discoveryRetryTimer?.Stop();
-                        _discoveryRetryTimer?.Dispose();
-                        _discoveryRetryTimer = null;
-                    }));
-                }
-                catch (ObjectDisposedException) { /* dialog closed between the probe and the marshal */ }
-                catch (InvalidOperationException) { /* handle not yet created */ }
-            });
-        };
-        _discoveryRetryTimer.Start();
+                    _discoveryRetryTimer?.Stop();
+                    _discoveryRetryTimer?.Dispose();
+                    _discoveryRetryTimer = null;
+                }));
+            }
+            catch (ObjectDisposedException) { /* dialog closed between the probe and the marshal */ }
+            catch (InvalidOperationException) { /* handle not yet created */ }
+        });
     }
 
     private bool _discoveryReadOk;
@@ -728,7 +805,24 @@ internal sealed class SettingsForm : Form
         _osd.ShowMessage(results.Replace("\r\n", " | ").TrimEnd(' ', '|'), 5000);
     }
 
-    private void ApplySettings(bool notify)
+    /// <summary>
+    /// Four outcomes that callers (OnSave, OnApply) need to route on:
+    /// <list type="bullet">
+    ///   <item><term>Normal</term><description>Save succeeded; post-save UI work proceeds normally.</description></item>
+    ///   <item><term>ThemeRestartFired</term><description>Theme changed; replacement spawned; <c>Application.Exit()</c> queued. Caller MUST NOT touch UI on this dying instance.</description></item>
+    ///   <item><term>ThemeRestartFailed</term><description>Theme changed but <c>Process.Start</c> failed (locked exe, AV scan). User-facing OSD "Theme will apply on next launch" already shown. Caller should close dialog quietly (or, on the Apply path, refresh the tray) without firing the "Settings applied" OSD (which would bury the fallback message).</description></item>
+    ///   <item><term>SaveFailed</term><description>INI write failed. "Could not save settings…" OSD already shown and in-memory <c>_config</c> mutations were rolled back (at minimum <c>ThemeMode</c>). Caller should close dialog quietly without firing "Settings applied" (which would mislead).</description></item>
+    /// </list>
+    /// </summary>
+    private enum ApplyResult { Normal, ThemeRestartFired, ThemeRestartFailed, SaveFailed }
+
+    /// <summary>
+    /// Persists settings and triggers post-save side effects. Returns one of
+    /// the four <see cref="ApplyResult"/> outcomes; callers branch on the
+    /// result to decide whether to <c>Close()</c>, fire <c>_onApplied()</c>,
+    /// or show the "Settings applied" OSD.
+    /// </summary>
+    private ApplyResult ApplySettings(bool notify)
     {
         // Validate the sync-exe path. ValidateSyncExe rejects UNC paths (NTLM-leak
         // via SMB auth on File.Exists/LaunchSyncthing), null-byte truncation,
@@ -769,14 +863,33 @@ internal sealed class SettingsForm : Form
         _config.ApiKey = _edApiKey.Text;
         _config.WebUI = AppConfig.ValidateWebUI(_edWebUI.Text);
 
+        // Theme — snapshot the pre-save value so we can decide whether to
+        // auto-restart. Compare case-insensitively to match Load's normaliser.
+        string priorTheme = _config.ThemeMode;
+        string newTheme = _rbThemeLight.Checked ? "Light" : "Dark";
+        bool themeChanged = !string.Equals(priorTheme, newTheme,
+            StringComparison.OrdinalIgnoreCase);
+        _config.ThemeMode = newTheme;
+
         // NumericUpDown clamps to [Minimum, Maximum] on both spinner and typed input,
         // so no range check or fallback OSD is needed here — the value is always valid.
         _config.StartupDelay = (int)_nudDelay.Value;
 
         if (!_config.Save())
         {
+            // Roll back the ThemeMode mutation we made above \u2014 INI didn't
+            // persist, so in-memory _config must match disk. If we left
+            // _config.ThemeMode at the user's unsaved pick, a Settings-reopen
+            // before they fix the INI lock would pre-check the wrong radio
+            // (and the next successful Save without a theme change would
+            // silently flip the theme on the next launch \u2014 surprising).
+            // Other _config.* fields aren't read by pre-save UI state, so
+            // leaving them dirty is harmless; ThemeMode is the only field
+            // with a meaningful secondary reader between SaveFailed and
+            // the next save attempt.
+            _config.ThemeMode = priorTheme;
             _osd.ShowMessage("Could not save settings \u2014 file may be locked", 5000);
-            return;
+            return ApplyResult.SaveFailed;
         }
 
         // Everything past here used to block the UI thread: a 300 ms IsReachable
@@ -802,7 +915,60 @@ internal sealed class SettingsForm : Form
             : Path.Combine(
                 Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty) ?? string.Empty,
                 "Resources", "sync.ico");
-        Action? savedCallback = notify ? _onSaved : null;
+        // On a theme-restart, suppress the tray-rebuild callback — the
+        // replacement process re-reads everything from the INI and rebuilds
+        // its menu from scratch, so firing LoadFolders on a tray context
+        // that's about to dispose is just noise that races the teardown.
+        Action? savedCallback = (notify && !themeChanged) ? _onSaved : null;
+
+        if (themeChanged)
+        {
+            // Theme-restart path: run discovery PATCH + StartupShortcut.Apply
+            // SYNCHRONOUSLY here so the dying process completes them BEFORE
+            // Application.Exit fires. The pool-thread fan-out below would
+            // otherwise outlive Application.Exit, racing the replacement's
+            // 5 s mutex wait and writing OSDs into a disposed OsdToolTip.
+            // UI thread blocks ~1.5–2 s worst case; user clicked Save
+            // expecting some pause, and the replacement's confirmation toast
+            // at ~+800 ms covers the perceived gap.
+            //
+            // Skipped on this path: the WMI probe (a precondition warn — it
+            // re-fires on the next non-theme Save) and savedCallback (set to
+            // null above; replacement does its own LoadFolders on startup).
+            if (discoveryReadOk && !string.IsNullOrEmpty(apiKey) && _api.IsReachable())
+            {
+                try
+                {
+                    var g = globalDiscovery ? "true" : "false";
+                    var l = localDiscovery ? "true" : "false";
+                    var r = relayEnabled ? "true" : "false";
+                    var (status, _) = _api.Patch("/rest/config/options",
+                        $"{{\"globalAnnounceEnabled\":{g},\"localAnnounceEnabled\":{l},\"relaysEnabled\":{r}}}",
+                        timeoutMs: 1500);
+                    if (status != 200)
+                        TrayLog.Warn($"Discovery PATCH returned HTTP {status} on theme-restart.");
+                }
+                catch (Exception ex)
+                {
+                    TrayLog.Warn("Discovery PATCH threw on theme-restart: " + ex.Message);
+                }
+            }
+            if (iconPath is not null)
+            {
+                try { StartupShortcut.Apply(runOnStartup, iconPath); }
+                catch (Exception ex)
+                {
+                    TrayLog.Warn("StartupShortcut.Apply threw on theme-restart: " + ex.Message);
+                }
+            }
+            // TryAutoRestartForTheme returns true if the replacement process
+            // was successfully spawned (Application.Exit has been queued).
+            // On false, the fallback OSD ("Theme will apply on next launch")
+            // has already been shown by TryAutoRestartForTheme and this
+            // instance keeps running — caller should treat as "deferred".
+            bool restartFired = TryAutoRestartForTheme();
+            return restartFired ? ApplyResult.ThemeRestartFired : ApplyResult.ThemeRestartFailed;
+        }
 
         _ = System.Threading.Tasks.Task.Run(() =>
         {
@@ -875,24 +1041,137 @@ internal sealed class SettingsForm : Form
             // so calling it from this pool thread is safe.
             savedCallback?.Invoke();
         });
+        return ApplyResult.Normal;
+    }
+
+    /// <summary>
+    /// Spawn a replacement process with the <c>--after-theme-restart</c> flag.
+    /// Returns <c>true</c> if the replacement was successfully spawned and
+    /// <see cref="Application.Exit"/> was queued (caller should treat as
+    /// ThemeRestartFired and stop touching UI). Returns <c>false</c> if any
+    /// failure path fired — in that case the user-facing fallback OSD
+    /// ("Theme will apply on next launch") has already been shown, and the
+    /// caller should treat as ThemeRestartFailed (close dialog quietly,
+    /// don't bury the fallback OSD with a "Settings applied" toast).
+    /// </summary>
+    private bool TryAutoRestartForTheme()
+    {
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            TrayLog.Warn("Theme auto-restart skipped — Environment.ProcessPath was null/empty.");
+            _osd.ShowMessage("Theme will apply on next launch", 4000);
+            return false;
+        }
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo(exePath)
+            {
+                Arguments = "--after-theme-restart",
+                UseShellExecute = true,
+            });
+            if (p == null)
+            {
+                TrayLog.Warn("Theme auto-restart — Process.Start returned null; staying open.");
+                _osd.ShowMessage("Theme will apply on next launch", 4000);
+                return false;
+            }
+            // Replacement is spawned; let the rest of OnSave/OnApply close the
+            // form and let TrayApplicationContext's Dispose clean up. The
+            // replacement process retries the single-instance mutex for ~5 s
+            // (Program.Main's retry loop) so the dying instance can release it.
+            Application.Exit();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TrayLog.Warn($"Theme auto-restart failed (err={ex.GetType().Name}: {ex.Message}) — staying open.");
+            _osd.ShowMessage("Theme will apply on next launch", 4000);
+            return false;
+        }
     }
 
     private void OnSave(object? sender, EventArgs e)
     {
-        ApplySettings(notify: true);
-        Close();
+        var result = ApplySettings(notify: true);
+        switch (result)
+        {
+            case ApplyResult.ThemeRestartFired:
+                // Replacement is up, Application.Exit queued. Don't call
+                // Close(); the message pump's shutdown tears the form down.
+                return;
+            case ApplyResult.ThemeRestartFailed:
+                // Auto-restart fell back; non-theme changes were persisted
+                // but _onSaved was nulled (because themeChanged), so the
+                // tray menu would stay stale until the next poll tick.
+                // Fire _onApplied (the lightweight refresh, no HTTP) so the
+                // tray's local-settings labels reflect the saved state.
+                // Mirrors what OnApply does on this branch.
+                _onApplied();
+                Close();
+                return;
+            case ApplyResult.SaveFailed:
+                // "Could not save settings…" already shown by ApplySettings.
+                // Close dialog to match the pre-refactor behavior (every
+                // Save click dismisses regardless of outcome).
+                Close();
+                return;
+            case ApplyResult.Normal:
+                Close();
+                return;
+            default:
+                // C# `switch` statements don't enforce exhaustiveness on
+                // enums (unlike switch expressions). Future ApplyResult
+                // additions hit this branch and surface in the log instead
+                // of silently no-op'ing.
+                TrayLog.Warn($"OnSave: unhandled ApplyResult {result}");
+                Close();
+                return;
+        }
     }
 
     private void OnApply(object? sender, EventArgs e)
     {
-        // Skip the _onSaved() callback — that rebuilds the tray menu via LoadFolders
-        // (another HTTP GET). Apply persists local settings (WebUI label, ApiKey,
-        // etc.) and PATCHes discovery; the folder-list refetch is what Save (or the
-        // next 10s poll tick) is for. A separate rebuild runs below to keep the
-        // menu's local-settings labels fresh (e.g., WebUI URL shown in the menu item).
-        ApplySettings(notify: false);
-        _onApplied();
-        _osd.ShowMessage("Settings applied", 3000);
+        // OnApply is "save without close" — fires _onApplied (tray menu
+        // rebuild for non-folder local-settings labels like WebUI URL) and
+        // a brief "Settings applied" OSD for visual feedback.
+        //
+        // Skip the _onSaved() callback inside ApplySettings — that rebuilds
+        // the tray menu via LoadFolders (another HTTP GET). _onApplied
+        // (light-weight, no HTTP) covers the local-settings refresh.
+        var result = ApplySettings(notify: false);
+        switch (result)
+        {
+            case ApplyResult.ThemeRestartFired:
+                // Tray context being disposed via Application.Exit; touching
+                // UI would race teardown and the "Settings applied" OSD would
+                // bury the replacement's "Theme applied" toast at +800 ms.
+                return;
+            case ApplyResult.SaveFailed:
+                // "Could not save settings — file may be locked" already
+                // shown. Don't fire _onApplied (the tray would refresh
+                // against now-stale INI values that didn't persist) and
+                // don't show "Settings applied" (which would falsely
+                // overwrite the error message).
+                return;
+            case ApplyResult.ThemeRestartFailed:
+                // Auto-restart fallback OSD ("Theme will apply on next
+                // launch") already shown. Fire _onApplied so the tray
+                // reflects any non-theme local changes the user made in
+                // this same save (Click action, sound notifications, etc.)
+                // — these were persisted to INI and are now live. Skip
+                // "Settings applied" so the fallback OSD isn't overwritten.
+                _onApplied();
+                return;
+            case ApplyResult.Normal:
+                _onApplied();
+                _osd.ShowMessage("Settings applied", 3000);
+                return;
+            default:
+                // Same future-proofing rationale as OnSave's default arm.
+                TrayLog.Warn($"OnApply: unhandled ApplyResult {result}");
+                return;
+        }
     }
 
     // --- UI Helpers ---

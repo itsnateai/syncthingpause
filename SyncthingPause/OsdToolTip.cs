@@ -11,12 +11,16 @@ internal sealed class OsdToolTip : Form
     private readonly System.Windows.Forms.Timer _hideTimer;
     private bool _disposed;
 
-    private static readonly Color BgColor = Color.FromArgb(0x1E, 0x1E, 0x2E);
-    private static readonly Color FgColor = Color.FromArgb(0xCD, 0xD6, 0xF3);
+    // Theme-aware static caches — these capture Theme.* at first class load.
+    // Theme.Initialize must run before any OsdToolTip is constructed (currently
+    // guaranteed: TrayApplicationContext's ctor body calls Theme.Initialize
+    // before `_osd = new OsdToolTip()` further down).
+    private static readonly Color BgColor = Theme.Bg;
+    private static readonly Color FgColor = Theme.Fg;
 
     // CLAUDE.md: "Cached GDI objects in renderers (no allocation in paint paths)"
     // OSD repaints on every show — keep the border Pen process-lifetime.
-    private static readonly Pen BorderPen = new(Color.FromArgb(0x44, 0x44, 0x5A), 1);
+    private static readonly Pen BorderPen = new(Theme.OsdBorder, 1);
 
     public OsdToolTip()
     {

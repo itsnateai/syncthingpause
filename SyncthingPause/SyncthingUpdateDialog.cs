@@ -69,13 +69,15 @@ internal sealed class SyncthingUpdateDialog : Form
     // so we don't false-positive on the first real version we see.
     private readonly bool _runningKnown;
 
-    private static readonly Color BgColor = Color.FromArgb(0x1E, 0x1E, 0x2E);
-    private static readonly Color FgColor = Color.FromArgb(0xCD, 0xD6, 0xF3);
-    private static readonly Color DimColor = Color.FromArgb(0xA0, 0xA0, 0xC0);
-    private static readonly Color WarnColor = Color.FromArgb(255, 152, 0);
-    private static readonly Color OkColor = Color.FromArgb(76, 175, 80);
-    private static readonly Color ProgressBg = Color.FromArgb(0x2A, 0x2A, 0x3E);
-    private static readonly Color ProgressFg = Color.FromArgb(76, 175, 80);
+    // Theme-aware caches — captured at first class load (the user opening
+    // Check Now → "Update available" dialog is well after Theme.Initialize).
+    private static readonly Color BgColor = Theme.Bg;
+    private static readonly Color FgColor = Theme.Fg;
+    private static readonly Color DimColor = Theme.Dim;
+    private static readonly Color WarnColor = Theme.AccentWarn;
+    private static readonly Color OkColor = Theme.AccentGreen;
+    private static readonly Color ProgressBg = Theme.EditBg;
+    private static readonly Color ProgressFg = Theme.AccentGreen;
 
     // 60s ceiling on the post-POST poll. Syncthing's self-restart usually finishes
     // in ~5-15s; 60s tolerates a slow download on a constrained connection. After

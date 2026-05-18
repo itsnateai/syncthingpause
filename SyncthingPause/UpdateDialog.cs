@@ -47,12 +47,14 @@ internal sealed class UpdateDialog : Form
     private const string AppName = "SyncthingPause";
     private const string GitHubRepo = "itsnateai/syncthingpause";
 
-    private static readonly Color BgColor = Color.FromArgb(0x1E, 0x1E, 0x2E);
-    private static readonly Color FgColor = Color.FromArgb(0xCD, 0xD6, 0xF3);
-    private static readonly Color DimColor = Color.FromArgb(0xA0, 0xA0, 0xC0);
-    private static readonly Color WarnColor = Color.FromArgb(255, 152, 0);
-    private static readonly Color ProgressBg = Color.FromArgb(0x2A, 0x2A, 0x3E);
-    private static readonly Color ProgressFg = Color.FromArgb(76, 175, 80);
+    // Theme-aware caches — Theme.Initialize runs before this class is first
+    // touched (Update button click is well after TrayApplicationContext ctor).
+    private static readonly Color BgColor = Theme.Bg;
+    private static readonly Color FgColor = Theme.Fg;
+    private static readonly Color DimColor = Theme.Dim;
+    private static readonly Color WarnColor = Theme.AccentWarn;
+    private static readonly Color ProgressBg = Theme.EditBg;
+    private static readonly Color ProgressFg = Theme.AccentGreen;
 
     public UpdateDialog()
     {
@@ -693,14 +695,27 @@ internal sealed class UpdateDialog : Form
     /// </summary>
     internal static void ShowToast(string message)
     {
+        // Register with ApplicationExit so a fast Exit within the 1500 ms
+        // window disposes the timer instead of leaking its native HWND.
+        // Same pattern as Program.ShowDelayedThemeOsd — backported here
+        // after a verifier-round 2 audit found the gap.
         var delay = new System.Windows.Forms.Timer { Interval = 1500 };
+        EventHandler? exitHandler = null;
         delay.Tick += (_, _) =>
         {
             delay.Stop();
+            if (exitHandler != null) Application.ApplicationExit -= exitHandler;
             delay.Dispose();
             var toast = new ToastWindow(message);
             toast.Show();
         };
+        exitHandler = (_, _) =>
+        {
+            delay.Stop();
+            if (exitHandler != null) Application.ApplicationExit -= exitHandler;
+            delay.Dispose();
+        };
+        Application.ApplicationExit += exitHandler;
         delay.Start();
     }
 
