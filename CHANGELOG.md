@@ -4,6 +4,32 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.5 — 2026-05-18
+
+### Fix: UpdateDialog single-button-mode centering at 125%+ DPI + marquee scaling
+
+Verifier round on v3.2.4 surfaced two CRITICAL findings (convergence between Sonnet and Opus gap-audit pairs on the same issue — load-bearing signal). v3.2.4 added a `CenterX(int controlWidth)` helper that correctly centers controls in the **ctor** (where ClientSize.Width and the literal widths are both design-px) but breaks in the three **post-Show** handlers (`ShowVersionComparison`, `ShowError`, `ShowWingetNotice`) — after the AutoScale walk runs at handle creation, `ClientSize.Width` returns physical-px (e.g. 450 at 125%) while `_btnW = 100` is still a design-px literal. The mixed-units math `(450 - 100) / 2 = 175` lands the button 13 px right of true center against its post-Show physical Width of 125. `_btnRowY = 108` design-px assigned post-Show as physical (where _btnAction.Top is actually 135 physical) put the single-Cancel button 27 px above its row. Net effect at 125 % DPI: the OK / Cancel button on the "You're on the latest version" / error / winget screens drifted up-and-right of the layout grid.
+
+Second finding: the marquee progress timer's `barW = 80` design-px literal was compared against the already-physical `_progressOuter.Width`, so the marquee bar rendered as 80 physical-px (≈ 20 % of a 405-physical-px container at 125 %) instead of the intended 25 % proportional width.
+
+### What's underneath
+
+- **`UpdateDialog.cs · ShowVersionComparison / ShowError / ShowWingetNotice`** — replaced `new Point(CenterX(_btnW), _btnRowY)` with `new Point((ClientSize.Width - _btnCancel.Width) / 2, _btnAction.Top)`. Both operands are post-Show physical-px, math is unit-consistent.
+- **`UpdateDialog.cs · CenterX docstring`** — clarified that the helper is for **ctor-time use only**; documents the post-Show divergence and the alternative pattern used in the handlers. Removed the stale `"_ = 0;"` reference that didn't correspond to any code.
+- **`UpdateDialog.cs · marquee Tick`** — `step` and `barW` literals (4 / 80 design-px) now wrapped in `LogicalToDeviceUnits` so the bar's screen size scales proportionally with the container. `_progressFill.Size.Height` now reads `_progressOuter.Height` (post-Show physical) instead of a raw 16-px literal — bar always fills its container's vertical extent at every DPI.
+- **`UpdateDialog.cs · ShowVersionComparison + DownloadFileAsync`** — same `_progressOuter.Height` pull replaces two more raw 16-px height literals in `_progressFill.Size` assignments.
+- **`SyncthingPause.csproj`** — 3.2.4 → 3.2.5.
+
+### Known limitations (not fixed in v3.2.5)
+
+- **`SettingsForm.AddSectionHeader` DeviceDpi pre-handle:** verifier T2 flagged that `DeviceDpi` returns the primary monitor's DPI before the form's HWND exists. On a multi-monitor setup where the primary is 96 DPI and Settings opens on a secondary 125 % monitor, the divider math reverts to a no-op. Not a regression vs pre-v3.2.3 and the fix still works for single-monitor 125 % users (Suzy's reported case). Tracked for a future fix that re-runs the divider math on `OnDpiChanged`.
+- **Allowlist host-suffix scoping:** verifier T3 noted `*.githubusercontent.com` accepts cross-repo asset routing. SHA256SUMS verification catches tampered binaries, so this is defense-in-depth rather than a current vulnerability. Tighter path scoping is a future hardening play.
+- **Static GDI brush class-load ordering:** `ComboBgBrush` / `ComboSelectedBrush` in `SettingsForm.cs` capture the active palette at first class load. The v3.2.0 theme-restart design assumes `Theme.Initialize` ran first, which is true under normal startup but not enforced by the type system.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file publish deployed to `C:\Users\nate\proggy\Tools\syncthingpause\SyncthingPause.exe` and propagated to Suzy via the `ToSuzy` Syncthing share.
+
 ## v3.2.4 — 2026-05-18
 
 ### Fix: UpdateDialog centering + padding

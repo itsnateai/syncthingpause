@@ -201,16 +201,21 @@ internal sealed class UpdateDialog : Form
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
         _marqueeTimer.Tick += (_, _) =>
         {
-            // v3.2.4: progress bar height tightened 18 → 16 to match the new
-            // dialog geometry; _progressFill.Size must use the same height as
-            // _progressOuter or the bar would render with a 2 px slice above/
-            // below clipped to the parent's bounds.
-            const int step = 4, barW = 80;
+            // v3.2.5: step/barW converted to physical-px via LogicalToDeviceUnits
+            // so the marquee bar's screen size is proportional to the (already
+            // physical-px) _progressOuter.Width at every DPI. Pre-v3.2.5 these
+            // were raw 4 / 80 design-px literals that didn't autoscale, making
+            // the marquee bar visibly thinner at 125% (80/405 ≈ 20 % vs the
+            // intended 80/324 ≈ 25 %). Fill height pulled from _progressOuter.Height
+            // (post-Show physical) so the bar always fills its container's
+            // vertical extent regardless of design-px tweaks.
+            int step = LogicalToDeviceUnits(4);
+            int barW = LogicalToDeviceUnits(80);
             if (_marqueeForward) _marqueePos += step; else _marqueePos -= step;
             if (_marqueePos + barW >= _progressOuter.Width) _marqueeForward = false;
             if (_marqueePos <= 0) _marqueeForward = true;
             _progressFill.Location = new Point(_marqueePos, 0);
-            _progressFill.Size = new Size(barW, 16);
+            _progressFill.Size = new Size(barW, _progressOuter.Height);
         };
 
         Shown += async (_, _) =>
@@ -225,16 +230,18 @@ internal sealed class UpdateDialog : Form
     }
 
     /// <summary>
-    /// v3.2.4: returns the x coordinate that horizontally centers a control of
-    /// the given design-px width inside this dialog. Used by every Location
-    /// assignment in the ctor + the three single-button-mode handlers
-    /// (ShowVersionComparison, ShowError, ShowWingetNotice) so the layout
-    /// stays symmetric regardless of future ClientSize tweaks. Math runs in
-    /// design-px (ClientSize.Width is the design-baseline value set before
-    /// any Controls.Add); AutoScaleMode.Dpi scales the returned Point at
-    /// realization. The "_ = 0;" line silences CS8618 on _btnCancel which
-    /// is initialized further down — call sites use this helper only after
-    /// ClientSize is set so the divide-by-2 is well-defined.
+    /// Returns the x coordinate that horizontally centers a control of the
+    /// given design-px width inside this dialog. CALL FROM THE CTOR ONLY —
+    /// while the form is still pre-realization both ClientSize.Width and the
+    /// controlWidth argument are in design-px and the math is unit-consistent.
+    /// Post-Show, ClientSize.Width returns physical-px (e.g. 450 at 125% DPI)
+    /// while the same hardcoded controlWidth literal (e.g. _btnW = 100) is
+    /// still design-px — mixing them yields an off-center result (was a
+    /// v3.2.4 bug surfaced by verifier round: 13 px right-of-center for the
+    /// single-Cancel button at 125 %). The three single-button-mode handlers
+    /// (ShowVersionComparison, ShowError, ShowWingetNotice) re-center via
+    /// <c>(ClientSize.Width - _btnCancel.Width) / 2</c> instead — both
+    /// operands are post-Show physical-px so the math stays consistent.
     /// </summary>
     private int CenterX(int controlWidth) => (ClientSize.Width - controlWidth) / 2;
 
@@ -387,7 +394,10 @@ internal sealed class UpdateDialog : Form
     private void ShowVersionComparison()
     {
         _marqueeTimer.Stop();
-        _progressFill.Size = new Size(0, 16);
+        // v3.2.5: height tracks _progressOuter.Height (post-Show physical) so
+        // the fill matches the container at every DPI. Pre-v3.2.5 used a raw
+        // 16-px literal which was correct only at 100 %.
+        _progressFill.Size = new Size(0, _progressOuter.Height);
         _progressFill.Location = new Point(0, 0);
 
         var localVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
@@ -410,7 +420,15 @@ internal sealed class UpdateDialog : Form
             _lblStatus.Text = "You're on the latest version!";
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
-            _btnCancel.Location = new Point(CenterX(_btnW), _btnRowY);
+            // v3.2.5: re-center _btnCancel using its post-Show physical Width and
+            // _btnAction's post-Show physical Top — both already autoscaled, math
+            // stays in physical-px throughout. Pre-v3.2.5 used CenterX(_btnW) +
+            // _btnRowY which mixed physical ClientSize.Width with design-px
+            // _btnW=100 and design-px _btnRowY=108 — verifier-round-found bug:
+            // button landed 13 px right of center and 27 px above its row at 125%.
+            _btnCancel.Location = new Point(
+                (ClientSize.Width - _btnCancel.Width) / 2,
+                _btnAction.Top);
         }
     }
 
@@ -637,8 +655,11 @@ internal sealed class UpdateDialog : Form
             {
                 if (IsDisposed) return;
                 int pct = (int)(downloaded * 100 / totalBytes);
+                // v3.2.5: height from _progressOuter.Height (post-Show physical)
+                // — see ShowVersionComparison's matching note.
                 _progressFill.Size = new Size(
-                    (int)(_progressOuter.Width * downloaded / totalBytes), 16);
+                    (int)(_progressOuter.Width * downloaded / totalBytes),
+                    _progressOuter.Height);
                 var dlMB = downloaded / (1024.0 * 1024.0);
                 var totalMB = totalBytes / (1024.0 * 1024.0);
                 _lblDetail.Text = totalMB < 1
@@ -685,7 +706,10 @@ internal sealed class UpdateDialog : Form
         _lblDetail.Text = detail;
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
-        _btnCancel.Location = new Point(CenterX(_btnW), _btnRowY);
+        // v3.2.5: see ShowVersionComparison comment — post-Show physical math.
+        _btnCancel.Location = new Point(
+            (ClientSize.Width - _btnCancel.Width) / 2,
+            _btnAction.Top);
         _busy = false;
     }
 
@@ -849,7 +873,10 @@ internal sealed class UpdateDialog : Form
         _lblDetail.Text = "Use:  winget upgrade itsnateai.SyncthingPause";
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
-        _btnCancel.Location = new Point(CenterX(_btnW), _btnRowY);
+        // v3.2.5: see ShowVersionComparison comment — post-Show physical math.
+        _btnCancel.Location = new Point(
+            (ClientSize.Width - _btnCancel.Width) / 2,
+            _btnAction.Top);
     }
 
     // ─── Helpers ────────────────────────────────────────────────
