@@ -118,7 +118,7 @@ internal static class Theme
     }
 
     // ── Light — v2.1.x classic (pure white + cornsilk). ──
-    // Selected over Catppuccin Latte (the template's Variant A) because Nate's
+    // Selected over Catppuccin Latte (the template's Variant A) because the
     // first-look on the Latte port read as "cool tint, hurts eyes" at dialog
     // scale. v2.1.x classic mirrors the pixel-for-pixel feel of the original
     // MWBToggle/sibling pre-v2.x light theme: pure white BG, near-black text,

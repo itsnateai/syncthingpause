@@ -362,7 +362,7 @@ internal sealed class SettingsForm : Form
         // Show (OnHandleCreated). So this post-Add assignment in the ctor is
         // STILL design-px, and AutoScale handles the scaling correctly at Show.
         // Under PerMonitorV2, Control.DeviceDpi pre-handle returns the process's
-        // primary monitor DPI (120 on Suzy at 125 %), NOT 96 — so v3.2.2's
+        // primary monitor DPI (120 on a 125 % display), NOT 96 — so v3.2.2's
         // LogicalToDeviceUnits(200) returned 250 pre-Show, then AutoScale at
         // Show multiplied by 1.25 → 312.5 physical. _cbGlobal at x=20 physical
         // ended at 332 physical, overlapping the Theme: column at x=300, and
@@ -730,7 +730,7 @@ internal sealed class SettingsForm : Form
         // even at 200% DPI, and the trio's symmetry depends on uniform width.
 
         // v3.2.6: Update 62 → 78 (was clipping to "Updat" at 125 % — the +6 from
-        // v3.2.2 wasn't enough on Suzy's screen; +16 gives ~38 px of chrome
+        // v3.2.2 wasn't enough on the 125 % display; +16 gives ~38 px of chrome
         // margin around "Update" text ~40 design-px). Check Config 98 → 114
         // (was clipping to "Check" at 125 % — same story, +18 gives ~40 px
         // chrome margin around "Check Config" ~75 design-px). Hand-tuned chrome

@@ -84,7 +84,7 @@ internal sealed class UpdateDialog : Form
         // button row 32) inside 180 px = 86 px of dead padding (~48 % of dialog
         // height). The label widths (370) inside a 420 px form left an asymmetric
         // 20/30 px L/R margin, so labels weren't centered — visible at 125 % DPI
-        // (the "not centered on Suzy" report). The new geometry has ~94 px content
+        // (the "not centered" report from a 125 % display). The new geometry has ~94 px content
         // + 60 px padding (16 top, 16 bottom, +6/12 gaps) with all controls
         // dynamically centered via CenterX() so the dialog reads symmetric at
         // every DPI.

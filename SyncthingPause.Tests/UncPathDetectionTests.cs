@@ -23,7 +23,7 @@ public class UncPathDetectionTests
     }
 
     [DataTestMethod]
-    [DataRow(@"C:\Users\nate\Syncthing", DisplayName = "Valid local drive-letter path")]
+    [DataRow(@"C:\Users\Tester\Syncthing", DisplayName = "Valid local drive-letter path")]
     [DataRow(@"D:\", DisplayName = "Drive root")]
     [DataRow("relative/path", DisplayName = "Relative forward-slash (not UNC)")]
     [DataRow(@"relative\path", DisplayName = "Relative backslash (not UNC)")]

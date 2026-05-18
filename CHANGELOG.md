@@ -4,13 +4,37 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.8 — 2026-05-18
+
+### Privacy: scrub personal references from release notes, source comments, and test data
+
+The v3.2.x release cycle's CHANGELOG entries and a handful of source comments referenced the local development environment by personal name (bug reporter, machine names, Syncthing share name, local install path). This release rewrites all of those to neutral descriptions ("a 125 % display", "the reference machine", "deployed locally", etc.) so the public release surface no longer leaks development-environment identifiers.
+
+### What's underneath
+
+- **`CHANGELOG.md`** — v3.2.2 through v3.2.7 "Reported on…" intros, "Verifier coverage" deployment summaries, and lesson notes rewritten. Technical content unchanged — only the personal identifiers removed.
+- **`SettingsForm.cs · BuildDiscoverySection` / `BuildButtonRow`** — two comment blocks describing the PerMonitorV2 DPI math no longer name the reporter.
+- **`SyncthingPause/UpdateDialog.cs · ctor`** — ClientSize comment block no longer names the reporter.
+- **`SyncthingPause/Theme.cs`** — Light-variant rationale comment no longer names the reporter.
+- **`SyncthingPause.Tests/UncPathDetectionTests.cs`** — drive-letter test path uses a generic `Tester` username instead of a real one.
+- **GitHub release notes for v3.2.5 / v3.2.6 / v3.2.7** — body text on `github.com/itsnateai/syncthingpause/releases` rewritten to match the scrubbed CHANGELOG.
+- **`SyncthingPause.csproj`** — 3.2.7 → 3.2.8.
+
+### Known limitation (not fixed in v3.2.8)
+
+Commit messages in the v3.2.4 through v3.2.7 range still reference development-environment identifiers in their commit bodies. Rewriting those requires a force-push to `main`, which is a destructive operation — deferred pending an explicit decision on whether to rewrite history or leave it.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Repository-wide grep confirms zero matches for the scrubbed identifiers in the working tree.
+
 ## v3.2.7 — 2026-05-18
 
 ### Fix: revert v3.2.2 .Width LogicalToDeviceUnits wraps that overlapped Theme column at 125 %
 
-Reported by Nate after v3.2.6 sync to Suzy: the Theme column in the Discovery section showed "me" instead of "Theme:" and "ark" (with no radio dot) instead of "Dark" — clipped on the LEFT side. The Light radio button was fully visible to the right of where Dark should have been. Root cause was a misdiagnosis I introduced in v3.2.2: the verifier flagged `_cbGlobal.Width = 200` as "design-px literal overwriting an already-autoscaled checkbox" and I wrapped it in `LogicalToDeviceUnits(200)` to "convert to physical-px." Both the verifier and I had the wrong mental model — AutoScale doesn't fire on `Controls.Add`, it fires at Show (`OnHandleCreated`). So a post-Add assignment in the ctor is STILL design-px, and AutoScale handles the scaling at Show.
+Reported after v3.2.6 deploy: the Theme column in the Discovery section showed "me" instead of "Theme:" and "ark" (with no radio dot) instead of "Dark" — clipped on the LEFT side. The Light radio button was fully visible to the right of where Dark should have been. Root cause was a misdiagnosis I introduced in v3.2.2: the verifier flagged `_cbGlobal.Width = 200` as "design-px literal overwriting an already-autoscaled checkbox" and I wrapped it in `LogicalToDeviceUnits(200)` to "convert to physical-px." Both the verifier and I had the wrong mental model — AutoScale doesn't fire on `Controls.Add`, it fires at Show (`OnHandleCreated`). So a post-Add assignment in the ctor is STILL design-px, and AutoScale handles the scaling at Show.
 
-Under PerMonitorV2 (which the csproj enables), `Control.DeviceDpi` pre-handle returns the process's primary monitor DPI — **120 on Suzy at 125 %, NOT 96**. So v3.2.2's `LogicalToDeviceUnits(200)` returned 250 pre-Show; AutoScale at Show then multiplied by 1.25 → **312.5 physical**. `_cbGlobal` at `x=20 physical` ended at 332.5 physical, overlapping the Theme column at `x=300 physical`. The checkbox's opaque `BackColor` painted over the "The" of "Theme:" and the "D" + radio dot of "Dark". The Light radio at `x=380` was past the overlap zone and stayed fully visible.
+Under PerMonitorV2 (which the csproj enables), `Control.DeviceDpi` pre-handle returns the process's primary monitor DPI — **120 on a 125 % display, NOT 96**. So v3.2.2's `LogicalToDeviceUnits(200)` returned 250 pre-Show; AutoScale at Show then multiplied by 1.25 → **312.5 physical**. `_cbGlobal` at `x=20 physical` ended at 332.5 physical, overlapping the Theme column at `x=300 physical`. The checkbox's opaque `BackColor` painted over the "The" of "Theme:" and the "D" + radio dot of "Dark". The Light radio at `x=380` was past the overlap zone and stayed fully visible.
 
 ### What's underneath
 
@@ -20,17 +44,17 @@ Under PerMonitorV2 (which the csproj enables), `Control.DeviceDpi` pre-handle re
 
 ### Why this matters
 
-This is the second time in this session a verifier convergence (Sonnet + Opus agreeing) turned out to be wrong. Round 1's "post-Add design-literal overwrites autoscaled Width" finding was load-bearing only IF AutoScale had already fired — which it hasn't, at ctor time, on a Form whose handle isn't created yet. Both verifier models applied the same flawed assumption. Lesson: agent convergence is signal that something is **interesting**, not signal that the finding is **correct**. Empirical test (or in this case: deploying to Suzy's 125 % screen and observing the broken layout) is the only ground truth.
+This is the second time in this session a verifier convergence (Sonnet + Opus agreeing) turned out to be wrong. Round 1's "post-Add design-literal overwrites autoscaled Width" finding was load-bearing only IF AutoScale had already fired — which it hasn't, at ctor time, on a Form whose handle isn't created yet. Both verifier models applied the same flawed assumption. Lesson: agent convergence is signal that something is **interesting**, not signal that the finding is **correct**. Empirical test (or in this case: deploying to a 125 % screen and observing the broken layout) is the only ground truth.
 
 ### Verifier coverage
 
-Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file deployed to `C:\Users\nate\proggy\Tools\syncthingpause\SyncthingPause.exe`, propagated to Suzy via the `ToSuzy` Syncthing share, and published as a GitHub Release.
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file deployed locally and published as a GitHub Release.
 
 ## v3.2.6 — 2026-05-18
 
 ### Fix: Settings dialog Update + Check Config widths still clipped at 125%
 
-The v3.2.2 width bumps (Update 58 → 62, Check Config 100 → 98) were not generous enough — on Suzy's 125% display the Update button still clipped its trailing 'e' to "Updat" and Check Config clipped most of its text down to "Check". The v3.2.2 chrome margins were ~20-22 design-px each side, which is enough at 100% but Segoe UI hinting at 125% widens glyphs non-linearly and eats through the margin.
+The v3.2.2 width bumps (Update 58 → 62, Check Config 100 → 98) were not generous enough — on the 125% display the Update button still clipped its trailing 'e' to "Updat" and Check Config clipped most of its text down to "Check". The v3.2.2 chrome margins were ~20-22 design-px each side, which is enough at 100% but Segoe UI hinting at 125% widens glyphs non-linearly and eats through the margin.
 
 v3.2.6 bumps those two buttons more aggressively:
 - **Update**: 62 → 78 (+16 design-px, now ~38 px chrome margin around "Update" text ~40 design-px)
@@ -47,7 +71,7 @@ The form `sw` widens 410 → 440 to fit the bumps without crowding GitHub / Sync
 
 ### Verifier coverage
 
-Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file deployed to `C:\Users\nate\proggy\Tools\syncthingpause\SyncthingPause.exe`, propagated to Suzy via the `ToSuzy` Syncthing share, and published as a GitHub Release (`v3.2.6` tag) so Suzy's in-app updater picks it up via Settings → Update → Check.
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file deployed locally and published as a GitHub Release (`v3.2.6` tag) so end-user installs pick it up via Settings → Update → Check.
 
 ## v3.2.5 — 2026-05-18
 
@@ -67,19 +91,19 @@ Second finding: the marquee progress timer's `barW = 80` design-px literal was c
 
 ### Known limitations (not fixed in v3.2.5)
 
-- **`SettingsForm.AddSectionHeader` DeviceDpi pre-handle:** verifier T2 flagged that `DeviceDpi` returns the primary monitor's DPI before the form's HWND exists. On a multi-monitor setup where the primary is 96 DPI and Settings opens on a secondary 125 % monitor, the divider math reverts to a no-op. Not a regression vs pre-v3.2.3 and the fix still works for single-monitor 125 % users (Suzy's reported case). Tracked for a future fix that re-runs the divider math on `OnDpiChanged`.
+- **`SettingsForm.AddSectionHeader` DeviceDpi pre-handle:** verifier T2 flagged that `DeviceDpi` returns the primary monitor's DPI before the form's HWND exists. On a multi-monitor setup where the primary is 96 DPI and Settings opens on a secondary 125 % monitor, the divider math reverts to a no-op. Not a regression vs pre-v3.2.3 and the fix still works for single-monitor 125 % users (the reported case). Tracked for a future fix that re-runs the divider math on `OnDpiChanged`.
 - **Allowlist host-suffix scoping:** verifier T3 noted `*.githubusercontent.com` accepts cross-repo asset routing. SHA256SUMS verification catches tampered binaries, so this is defense-in-depth rather than a current vulnerability. Tighter path scoping is a future hardening play.
 - **Static GDI brush class-load ordering:** `ComboBgBrush` / `ComboSelectedBrush` in `SettingsForm.cs` capture the active palette at first class load. The v3.2.0 theme-restart design assumes `Theme.Initialize` ran first, which is true under normal startup but not enforced by the type system.
 
 ### Verifier coverage
 
-Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file publish deployed to `C:\Users\nate\proggy\Tools\syncthingpause\SyncthingPause.exe` and propagated to Suzy via the `ToSuzy` Syncthing share.
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file publish deployed locally.
 
 ## v3.2.4 — 2026-05-18
 
 ### Fix: UpdateDialog centering + padding
 
-Reported on Suzy's 125% display: the **Update** dialog (opened from Settings → Update) was *quite large and full of unused padding*, and the status/detail text wasn't centered on her screen even though it was on a 100% display. Root cause was a familiar one for this codebase — every horizontally-positioned control in the dialog used a hand-tuned `Location.X` literal, and those literals had drifted off-center as the form size and button widths evolved over the v2.x/v3.x history. The status label sat at `Location(20, 20)` with `Size(370, 24)` inside `ClientSize(420, 180)` — left margin 20, right margin 30, so the label was off-center by 10 design-px (≈ 12 px at 125% DPI, visible to the eye). The two-button row at `(166, 112)` + `(296, 112)` ended up 11 px right of form center; the single-Cancel mode at `(170, 112)` was 15 px right. And the dialog had ≈ 86 px of dead vertical padding around 94 px of content (~48% empty space) — the "unused padding" complaint.
+Reported on a 125% display: the **Update** dialog (opened from Settings → Update) was *quite large and full of unused padding*, and the status/detail text wasn't centered on the high-DPI screen even though it was on a 100% display. Root cause was a familiar one for this codebase — every horizontally-positioned control in the dialog used a hand-tuned `Location.X` literal, and those literals had drifted off-center as the form size and button widths evolved over the v2.x/v3.x history. The status label sat at `Location(20, 20)` with `Size(370, 24)` inside `ClientSize(420, 180)` — left margin 20, right margin 30, so the label was off-center by 10 design-px (≈ 12 px at 125% DPI, visible to the eye). The two-button row at `(166, 112)` + `(296, 112)` ended up 11 px right of form center; the single-Cancel mode at `(170, 112)` was 15 px right. And the dialog had ≈ 86 px of dead vertical padding around 94 px of content (~48% empty space) — the "unused padding" complaint.
 
 ### What's underneath
 
@@ -92,7 +116,7 @@ Reported on Suzy's 125% display: the **Update** dialog (opened from Settings →
 
 ### Verifier coverage
 
-Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file publish deployed to `C:\Users\nate\proggy\Tools\syncthingpause\` (relaunched, PID 45084 at deploy time), and dropped into the `ToSuzy` Syncthing share for propagation to the `sendmorepickles` device. Visual smoke at 100% pending on Asus; 125% smoke pending on Suzy once the sync lands.
+Build clean (0 warnings, 0 errors). 92/92 tests pass. Self-contained single-file publish deployed locally (relaunched, PID 45084 at deploy time). Visual smoke at 100% pending on the reference machine; 125% smoke pending on the high-DPI test machine once the sync lands.
 
 ## v3.2.3 — 2026-05-18
 
@@ -112,7 +136,7 @@ Verifier also surfaced two minor inconsistencies introduced by the v3.2.2 helper
 Verifier flagged three concerns that are structural / scope-creep rather than v3.2.x regressions, captured here for the record:
 
 1. **PerMonitorV2 cross-monitor drag.** The csproj declares `ApplicationHighDpiMode=PerMonitorV2` but `SettingsForm` has no `OnDpiChanged` override. Every post-`Controls.Add` `Location` assignment (every button in this dialog, plus the NUD + reveal eye + Theme radios) holds physical-px values captured at the source monitor's DPI; if the form is dragged to a monitor at a different DPI mid-session, WinForms scales the form chrome but the manually-set Locations don't re-derive. Will need a separate fix that re-runs the position-chaining math on `OnDpiChanged`. Not a regression vs pre-v3.2.2 — the existing form had the same blind spot.
-2. **150-200% DPI scale untested empirically.** The fix was validated on 100% (Asus) and reported against 125% (Suzy). The hand-tuned button widths chose 25-40% chrome margin around the measured text, which should fit at 200% with the linearity assumption of `AutoScaleMode.Dpi`, but Segoe UI hinting can produce non-linear glyph widening at certain scale jumps. No 175%/200% smoke yet.
+2. **150-200% DPI scale untested empirically.** The fix was validated on 100% and reported against 125%. The hand-tuned button widths chose 25-40% chrome margin around the measured text, which should fit at 200% with the linearity assumption of `AutoScaleMode.Dpi`, but Segoe UI hinting can produce non-linear glyph widening at certain scale jumps. No 175%/200% smoke yet.
 3. **Localization.** All Button `Text` values are hardcoded English. Long localized strings (German "Verbindung wird geprüft" for "Check Now", "Konfiguration prüfen" for "Check Config") would clip in their fixed-width buttons. Out of scope for v3.2.x — the app is English-only.
 
 ### What's underneath
@@ -124,13 +148,13 @@ Verifier flagged three concerns that are structural / scope-creep rather than v3
 
 ### Verifier coverage
 
-92/92 tests pass. Build clean (0 warnings, 0 errors). Self-contained single-file publish deployed to `C:\Users\nate\proggy\Tools\syncthingpause\SyncthingPause.exe` (v3.2.0 backed up as `.v320.bak`). Visual smoke at 100% on Asus confirmed; the section-header divider fix is most visible at 125%+ where pre-v3.2.3 the dividers under "General"/"Paths"/etc. drifted to the right.
+92/92 tests pass. Build clean (0 warnings, 0 errors). Self-contained single-file publish deployed locally (v3.2.0 backed up as `.v320.bak`). Visual smoke at 100% on the reference machine confirmed; the section-header divider fix is most visible at 125%+ where pre-v3.2.3 the dividers under "General"/"Paths"/etc. drifted to the right.
 
 ## v3.2.2 — 2026-05-18
 
 ### Fix: Settings dialog clipping on 125%+ DPI displays
 
-Reported on a 125% display-scale laptop (Suzy's screen): the **Web UI → Open** button rendered as **"Ope"**; the **GitHub / Update / Syncthing / Help / Check Config** row got smushed against the form's bottom edge with descenders on `g` and `p` truncated; **"Syncthing"** showed up as **"Syncthi"**; **"Check Config"** lost the trailing `ig`; the **Windows startup delay** `NumericUpDown` appeared visually underneath the trailing word "delay" of its own label rather than to the right of it. Root cause was a mix of (a) button widths that fit the text at 100% scale with no margin, so DPI auto-scaling at 125%+ didn't leave enough chrome for the slightly-wider glyph rendering at higher DPI, and (b) mixed-DPI math in several spots — e.g. `Width = 200` overwriting an already-autoscaled checkbox width, or `_cbRelay.Bottom + 4` mixing physical-px with design-px. v3.2.2 hand-tunes button widths with a 24-32 design-px chrome margin around the measured text (uniform visual rhythm at 100%, comfortable headroom at 125-200%) and converts every post-Add design-literal override via `LogicalToDeviceUnits` so design-px and device-px never get mixed in the same expression.
+Reported on a 125% display-scale laptop: the **Web UI → Open** button rendered as **"Ope"**; the **GitHub / Update / Syncthing / Help / Check Config** row got smushed against the form's bottom edge with descenders on `g` and `p` truncated; **"Syncthing"** showed up as **"Syncthi"**; **"Check Config"** lost the trailing `ig`; the **Windows startup delay** `NumericUpDown` appeared visually underneath the trailing word "delay" of its own label rather than to the right of it. Root cause was a mix of (a) button widths that fit the text at 100% scale with no margin, so DPI auto-scaling at 125%+ didn't leave enough chrome for the slightly-wider glyph rendering at higher DPI, and (b) mixed-DPI math in several spots — e.g. `Width = 200` overwriting an already-autoscaled checkbox width, or `_cbRelay.Bottom + 4` mixing physical-px with design-px. v3.2.2 hand-tunes button widths with a 24-32 design-px chrome margin around the measured text (uniform visual rhythm at 100%, comfortable headroom at 125-200%) and converts every post-Add design-literal override via `LogicalToDeviceUnits` so design-px and device-px never get mixed in the same expression.
 
 ### Tried first, then reverted: AutoSize
 
@@ -152,7 +176,7 @@ The first v3.2.2 draft used `AutoSize = true, AutoSizeMode = GrowAndShrink, Padd
 
 ### Verifier coverage
 
-Build clean (0 warnings, 0 errors). 92/92 tests pass against the pre-revert DLL — the AutoSize→hand-tuned-widths revert touches only helper signatures and width-literal values, no logic that the existing unit tests cover. Visual smoke pending against the running tray on Asus 100% scale and Suzy's 125% scale.
+Build clean (0 warnings, 0 errors). 92/92 tests pass against the pre-revert DLL — the AutoSize→hand-tuned-widths revert touches only helper signatures and width-literal values, no logic that the existing unit tests cover. Visual smoke pending against the running tray on the reference 100% machine and the 125% test machine.
 
 ## v3.2.1 — 2026-05-18
 
