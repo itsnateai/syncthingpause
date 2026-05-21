@@ -1,6 +1,10 @@
 # SyncthingPause
 
-[![GitHub downloads](https://img.shields.io/github/downloads/itsnateai/syncthingpause/total?label=downloads&color=brightgreen)](https://github.com/itsnateai/syncthingpause/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/itsnateai/syncthingpause)](https://github.com/itsnateai/syncthingpause/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
+[![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)](https://github.com/itsnateai/syncthingpause)
+[![GitHub Downloads](https://img.shields.io/github/downloads/itsnateai/syncthingpause/total)](https://github.com/itsnateai/syncthingpause/releases)
 
 *Pause Syncthing from your tray. One click. Resume when you're done.*
 
