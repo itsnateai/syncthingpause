@@ -1,5 +1,7 @@
 # SyncthingPause
 
+[![GitHub downloads](https://img.shields.io/github/downloads/itsnateai/syncthingpause/total?label=downloads&color=brightgreen)](https://github.com/itsnateai/syncthingpause/releases)
+
 *Pause Syncthing from your tray. One click. Resume when you're done.*
 
 A lightweight Windows tray companion for [Syncthing](https://syncthing.net/), built with C# (.NET 8 WinForms). Launches Syncthing hidden, shows sync state in the icon, and gives you one-click pause/resume — that's the headline feature; everything else exists to support it.
