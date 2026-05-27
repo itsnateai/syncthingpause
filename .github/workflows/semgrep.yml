@@ -20,7 +20,7 @@ jobs:
       contents: read
       security-events: write  # required by github/codeql-action/upload-sarif
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # `--sarif --output=…` writes findings to a file so we can upload to
       # GitHub's Security tab via codeql-action below — in addition to the
       # platform push that SEMGREP_APP_TOKEN does. Without this, warn-level
@@ -59,6 +59,6 @@ jobs:
       # in the Security tab.
       - name: Upload SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           sarif_file: semgrep.sarif
