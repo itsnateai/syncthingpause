@@ -1,12 +1,20 @@
 name: WinGet Submit
 
 on:
-  release:
-    types: [published]
+  # Chain off the Release workflow completing — NOT `release: published`.
+  # A release created by the Action's GITHUB_TOKEN does not trigger the
+  # `release` event (GitHub's anti-recursion rule silently suppresses it),
+  # so bot-authored releases never auto-submitted and WinGet drifted behind.
+  # workflow_run fires on the upstream run finishing regardless of how it was
+  # triggered or who authored the release, so this works for bot- and
+  # human-published releases alike. See repo history / CHANGELOG.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to submit (e.g. v1.2.3)"
+        description: "Tag to submit (e.g. v3.2.11)"
         required: true
 
 permissions:
@@ -19,26 +27,33 @@ env:
 jobs:
   submit:
     runs-on: windows-latest
+    # workflow_run fires on completion regardless of conclusion, so gate on
+    # success — a failed/cancelled Release run must never reach WinGet.
+    # Manual dispatch always runs.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Resolve tag
         id: tag
         shell: pwsh
-        # Funnel attacker-controllable inputs (tag names, dispatch inputs)
-        # through env vars instead of `${{ … }}` template substitution into
-        # the script body. PowerShell treats env values as opaque strings;
-        # template substitution would let a tag like `v1';evil-code;#` break
-        # out of the surrounding quotes and execute arbitrary commands with
-        # access to WINGET_PAT.
+        # Funnel attacker-controllable inputs through env vars instead of
+        # `${{ … }}` template substitution into the script body. Both the
+        # dispatch `tag` input AND the upstream run's `head_branch` (a ref
+        # name a pusher controls) are untrusted. PowerShell treats env values
+        # as opaque strings; template substitution would let a crafted value
+        # like `v1';evil-code;#` break out of the surrounding quotes and
+        # execute arbitrary commands with access to WINGET_PAT.
         # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions
         env:
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ github.event.inputs.tag }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          $t = if ($env:EVENT_NAME -eq 'release') { $env:EVENT_TAG } else { $env:INPUT_TAG }
+          $t = if ($env:EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_TAG } else { $env:RUN_HEAD_BRANCH }
           # Strict tag-name validation — accept only `vMAJOR.MINOR.PATCH`
           # optionally followed by a prerelease suffix. Defense-in-depth in
-          # case the env-var funnel is ever bypassed.
+          # case the env-var funnel is ever bypassed, AND the gate that makes
+          # a non-tag head_branch (e.g. a Release run that fired off a branch)
+          # fail loud here instead of submitting junk to WinGet.
           if ($t -notmatch '^v\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$') {
             throw "Tag '$t' must match vMAJOR.MINOR.PATCH (optionally -prerelease)"
           }
