@@ -17,6 +17,12 @@ internal static class Program
     [STAThread]
     static void Main(string[] args)
     {
+#if DEBUG
+        // DPI render harness (Debug-only): render a single form to a PNG and exit, so a
+        // real high-DPI display can verify the layout-container rebuild. See DiagRender.cs.
+        if (args.Contains("--diag-render-form")) { DiagRender.Run(args); return; }
+#endif
+
         // v3.0.0 rename bridge: SyncthingTray.exe (rename predecessor) uses a
         // different single-instance mutex name, so the same-name kill loop
         // below won't find it. Kill any SyncthingTray instance in our session

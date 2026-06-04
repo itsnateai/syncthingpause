@@ -92,40 +92,44 @@ github.com/itsnateai/syncthingpause";
         ShowIcon = false;
         StartPosition = FormStartPosition.CenterScreen;
         TopMost = true;
-        ClientSize = new Size(400, 380);
+        ClientSize = new Size(440, 470);
         BackColor = BgColor;
         ShowInTaskbar = false;
-        // Pin design baseline to 96 DPI BEFORE AutoScaleMode so literal Size/Point
-        // values below are always interpreted at 96 DPI regardless of which monitor
-        // the form is realized on. See SettingsForm.cs for the full rationale.
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
         var labelFont = new Font("Segoe UI", 10f, FontStyle.Bold);
         _fonts.Add(labelFont);
-        var btnFont = new Font("Segoe UI", 8f);
-        _fonts.Add(btnFont);
+
+        // Dock-based layout: title (top) / help text (fills + scrolls) / buttons (bottom).
+        // A root TableLayoutPanel orders the three regions deterministically and re-flows
+        // at any DPI - zero absolute pixel positions, so 100% and 150% are identical.
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = BgColor,
+            Padding = new Padding(12, 10, 12, 10),
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // title
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f)); // help text fills the middle
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // button row
 
         var lblTitle = new Label
         {
             Text = $"SyncthingPause v{AppConfig.Version}",
             Font = labelFont,
             ForeColor = FgColor,
-            Location = new Point(16, 14),
             AutoSize = true,
+            Margin = new Padding(0, 0, 0, 8),
         };
-        Controls.Add(lblTitle);
-
-        var topDivider = new Label
-        {
-            Location = new Point(0, 36),
-            Size = new Size(400, 1),
-            BackColor = DividerColor,
-        };
-        Controls.Add(topDivider);
+        root.Controls.Add(lblTitle, 0, 0);
 
         var textBox = new RichTextBox
         {
+            Dock = DockStyle.Fill,
             ReadOnly = true,
             BorderStyle = BorderStyle.None,
             BackColor = BgColor,
@@ -134,10 +138,9 @@ github.com/itsnateai/syncthingpause";
             DetectUrls = false,
             WordWrap = true,
             TabStop = false,
-            Location = new Point(16, 46),
-            Size = new Size(368, 270),
+            Margin = new Padding(0, 0, 0, 8),
         };
-        Controls.Add(textBox);
+        root.Controls.Add(textBox, 0, 1);
         RenderHelp(textBox);
 
         // Kill default "all text selected when shown" behavior.
@@ -149,63 +152,20 @@ github.com/itsnateai/syncthingpause";
             ActiveControl = null;
         };
 
-        var btnDivider = new Label
-        {
-            Location = new Point(0, 326),
-            Size = new Size(400, 1),
-            BackColor = DividerColor,
-        };
-        Controls.Add(btnDivider);
-
-        // Three-button row: Docs | Backup Settings | Close.
-        // 16 .. 126 | 145 .. 255 | 274 .. 384 — 19 px gaps, symmetric inside the
-        // 400 px content width.
-        var btnDocs = new Button
-        {
-            Text = "Syncthing Docs",
-            Font = btnFont,
-            Location = new Point(16, 340),
-            Size = new Size(110, 26),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-        };
-        btnDocs.FlatAppearance.BorderColor = DividerColor;
+        var btnDocs = Fields.Button("Syncthing Docs");
         btnDocs.Click += (_, _) =>
         {
             // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- URL is a string literal, zero user input
             using var p = Process.Start(new ProcessStartInfo("https://docs.syncthing.net") { UseShellExecute = true });
         };
-        Controls.Add(btnDocs);
-
-        var btnBackup = new Button
-        {
-            Text = "Backup Settings",
-            Font = btnFont,
-            Location = new Point(145, 340),
-            Size = new Size(110, 26),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-        };
-        btnBackup.FlatAppearance.BorderColor = DividerColor;
+        var btnBackup = Fields.Button("Backup Settings");
         btnBackup.Click += (_, _) => BackupSettings();
-        Controls.Add(btnBackup);
-
-        var btnClose = new Button
-        {
-            Text = "Close",
-            Font = btnFont,
-            Location = new Point(274, 340),
-            Size = new Size(110, 26),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            DialogResult = DialogResult.Cancel,
-        };
-        btnClose.FlatAppearance.BorderColor = DividerColor;
+        var btnClose = Fields.Button("Close");
+        btnClose.DialogResult = DialogResult.Cancel;
         btnClose.Click += (_, _) => Close();
-        Controls.Add(btnClose);
+        root.Controls.Add(Bars.Spread(btnDocs, btnBackup, btnClose), 0, 2);
+
+        Controls.Add(root);
 
         CancelButton = btnClose;
         AcceptButton = btnClose;

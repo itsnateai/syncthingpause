@@ -98,6 +98,7 @@ internal static class Theme
     public static System.Drawing.Color AccentWarn        => _isDark ? Dark.AccentWarn        : Light.AccentWarn;
     public static System.Drawing.Color OsdBorder         => _isDark ? Dark.OsdBorder         : Light.OsdBorder;
     public static System.Drawing.Color ComboSelectedBg   => _isDark ? Dark.ComboSelectedBg   : Light.ComboSelectedBg;
+    public static System.Drawing.Color PanelBg           => _isDark ? Dark.PanelBg           : Light.PanelBg;
 
     // ── Dark — Catppuccin Mocha (existing palette, untouched). ──
     private static class Dark
@@ -115,6 +116,9 @@ internal static class Theme
         public static readonly System.Drawing.Color AccentWarn      = System.Drawing.Color.FromArgb(255, 152, 0);
         public static readonly System.Drawing.Color OsdBorder       = System.Drawing.Color.FromArgb(0x44, 0x44, 0x5A);
         public static readonly System.Drawing.Color ComboSelectedBg = System.Drawing.Color.FromArgb(0x35, 0x35, 0x50);
+        // Card surface — a hair lighter than Bg so cards lift off the form background
+        // (mirrors EQSwitch's BgPanel-over-BgDark lift; +8 on the Catppuccin Base).
+        public static readonly System.Drawing.Color PanelBg         = System.Drawing.Color.FromArgb(0x26, 0x26, 0x36);
     }
 
     // ── Light — v2.1.x classic (pure white + cornsilk). ──
@@ -144,5 +148,6 @@ internal static class Theme
         public static readonly System.Drawing.Color AccentWarn      = System.Drawing.Color.FromArgb(0xB4, 0x53, 0x09); // deep amber — warning text (distinct from offline-red so "warn" reads as caution, "offline" as error)
         public static readonly System.Drawing.Color OsdBorder       = System.Drawing.Color.FromArgb(0xC8, 0xC8, 0xC8); // matches divider
         public static readonly System.Drawing.Color ComboSelectedBg = System.Drawing.Color.FromArgb(0xFF, 0xF8, 0xDC); // cornsilk — matches hover tint
+        public static readonly System.Drawing.Color PanelBg         = System.Drawing.Color.FromArgb(0xF6, 0xF6, 0xF8); // faint grey card surface on white
     }
 }

@@ -44,28 +44,12 @@ internal sealed class SettingsForm : Form
     private RadioButton _rbThemeDark = null!;
     private RadioButton _rbThemeLight = null!;
 
-    private readonly Font _boldFont;
-    private readonly Font _normalFont;
-    private readonly Font _sectionFont;
-    private readonly Font _monoFont;
-    private readonly Font _btnFont;
-    private readonly Font _subFont;
+    // Reveal-glyph button (MDL2); every other control draws from CardLayout's CardFonts.
     private readonly Font _iconFont;
 
-    // Theme-aware static caches — SettingsForm class loads when the user opens
-    // Settings (well after Theme.Initialize ran in TrayApplicationContext's ctor),
-    // so these capture the active palette correctly.
+    // Form background (captured after Theme.Initialize); CardLayout reads the rest
+    // of the palette directly from Theme.* per render.
     private static readonly Color BgColor = Theme.Bg;
-    private static readonly Color FgColor = Theme.Fg;
-    private static readonly Color DimColor = Theme.Dim;
-    private static readonly Color DividerColor = Theme.Divider;
-    private static readonly Color EditBgColor = Theme.EditBg;
-    private static readonly Color ComboSelectedBgColor = Theme.ComboSelectedBg;
-    private static readonly Color WarnLabelColor = Theme.FgDisabled;
-
-    // Convention: cache GDI in paint paths — combo item draw fires per item per paint.
-    private static readonly SolidBrush ComboBgBrush = new(EditBgColor);
-    private static readonly SolidBrush ComboSelectedBrush = new(ComboSelectedBgColor);
 
     public SettingsForm(AppConfig config, SyncthingApi api, OsdToolTip osd, Action onApplied, Action onSaved)
     {
@@ -75,12 +59,6 @@ internal sealed class SettingsForm : Form
         _onApplied = onApplied;
         _onSaved = onSaved;
 
-        _boldFont = new Font("Segoe UI", 9f, FontStyle.Bold);
-        _normalFont = new Font("Segoe UI", 9f);
-        _sectionFont = new Font("Segoe UI", 8f, FontStyle.Bold);
-        _monoFont = new Font("Consolas", 8f);
-        _btnFont = new Font("Segoe UI", 8f);
-        _subFont = new Font("Segoe UI", 8f);
         _iconFont = new Font("Segoe MDL2 Assets", 9f);
 
         Text = $"SyncthingPause v{AppConfig.Version} \u2014 Settings";
@@ -104,30 +82,29 @@ internal sealed class SettingsForm : Form
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        // v3.2.6: sw 410 → 440. The +30 design-px give the v3.2.2 hand-tuned
-        // top button row a wider playing field: bumps Update (62→78) and Check
-        // Config (98→114) so neither clips even at 125%+ DPI where Segoe UI
-        // glyph hinting widens text non-linearly. Bottom row Save/Apply/Cancel
-        // re-centered to fill the new width symmetrically.
-        int sw = 440;
-        int y = 10;
+        // Layout: one card per former section, stacked + scrollable. Every control
+        // lands in the same field the unchanged Save/probe logic reads — only how
+        // the controls are created and positioned changes, never the behaviour.
+        var stack = new CardStack(this, scroll: true);
+        BuildClickActionsSection(stack);
+        BuildGeneralSection(stack);
+        BuildPathsSection(stack);
+        BuildApiSection(stack);
+        BuildDiscoverySection(stack);
+        BuildUpdatesSection(stack);
+        BuildButtonRow(stack);
 
-        BuildClickActionsSection(ref y, sw);
-        BuildGeneralSection(ref y, sw);
-        BuildPathsSection(ref y, sw);
-        BuildApiSection(ref y, sw);
-        BuildDiscoverySection(ref y, sw);
-        BuildUpdatesSection(ref y, sw);
-        BuildButtonRow(ref y, sw);
-
-        // v3.2.2: was y += 40 — bumped to 48 to give the bottom-row buttons
-        // a touch more breathing room below their descenders. At 125% DPI on
-        // some configs the previous 40 design-px (50 physical) put the bottom
-        // edge of the form too close to the buttons, visually clipping the
-        // lower stroke of glyphs like 'g' and 'p'. 48 design-px (60 physical)
-        // restores the proportions seen at 100% scale.
-        y += 48;
-        ClientSize = new Size(sw, y);
+        // Fit the window to its content; clamp to the work area so a tall 150% render
+        // scrolls inside the AutoScroll host instead of running off-screen. Measured on
+        // Load (handle exists + AutoScale has run → ContentSize is device-DPI accurate).
+        Load += (_, _) =>
+        {
+            var content = stack.ContentSize;
+            int availH = Screen.FromControl(this).WorkingArea.Height - LogicalToDeviceUnits(80);
+            int w = content.Width, h = content.Height;
+            if (h > availH) { h = availH; w += SystemInformation.VerticalScrollBarWidth; }
+            ClientSize = new Size(w, h);
+        };
 
         // First-run auto-open can land behind a fullscreen app (game, video) since
         // TopMost loses to fullscreen D3D. Force foreground on the first paint so
@@ -139,129 +116,55 @@ internal sealed class SettingsForm : Form
         };
     }
 
-    private void BuildClickActionsSection(ref int y, int sw)
+    private void BuildClickActionsSection(CardStack stack)
     {
-        AddSectionHeader("Tray Click Actions", 16, ref y, sw);
+        var card = stack.NewCard("\U0001F5B1", "Tray Click Actions", Theme.AccentBlue);
 
-        // Combo width sized to content: longest option "Pause/Resume" + chevron +
-        // padding fits comfortably in 160px. Matches professional-settings-dialog
-        // convention of proportional-to-content sizing rather than row-filling.
-        AddLabel("Double-click:", 16, y + 2, 0, _normalFont, DimColor);
-        _cboDblClick = AddComboBox(112, y, 160, AppConfig.ClickActions, AppConfig.ActionValueToIndex(_config.DblClickAction),
-            accessibleName: "Double-click action");
-        y += 30;
+        _cboDblClick = card.RowFit("Double-click:",
+            Fields.Combo(160, AppConfig.ClickActions, AppConfig.ActionValueToIndex(_config.DblClickAction)));
+        _cboDblClick.AccessibleName = "Double-click action";
 
-        AddLabel("Middle-click:", 16, y + 2, 0, _normalFont, DimColor);
-        _cboMiddleClick = AddComboBox(112, y, 160, AppConfig.ClickActions, AppConfig.ActionValueToIndex(_config.MiddleClickAction),
-            accessibleName: "Middle-click action");
-        y += 30;
+        _cboMiddleClick = card.RowFit("Middle-click:",
+            Fields.Combo(160, AppConfig.ClickActions, AppConfig.ActionValueToIndex(_config.MiddleClickAction)));
+        _cboMiddleClick.AccessibleName = "Middle-click action";
     }
 
-    private void BuildGeneralSection(ref int y, int sw)
+    private void BuildGeneralSection(CardStack stack)
     {
-        AddSectionHeader("General", 16, ref y, sw);
+        var card = stack.NewCard("⚙", "General", Theme.AccentBlue);
 
-        _cbRunOnStartup = AddCheckBox("Run on startup", 16, y, _config.RunOnStartup);
+        _cbRunOnStartup = card.Check(Fields.Check("Run on startup", _config.RunOnStartup));
         if (_config.IsPortable)
         {
             _cbRunOnStartup.Enabled = false;
-            AddLabel("(not available in portable mode)", 36, y + 18, 300, _subFont, WarnLabelColor);
-            y += 16;
+            card.Hint("(not available in portable mode)");
         }
-        y += 26;
+        _cbStartBrowser = card.Check(Fields.Check("Start browser when Syncthing launches", _config.StartBrowser));
+        _cbNetPause = card.Check(Fields.Check("Auto-pause on public networks", _config.NetworkAutoPause));
+        _cbSoundNotify = card.Check(Fields.Check("Play sounds on events", _config.SoundNotifications));
+        _cbStopOnExit = card.Check(Fields.Check("Stop Syncthing when tray exits", _config.StopOnExit));
 
-        _cbStartBrowser = AddCheckBox("Start browser when Syncthing launches", 16, y, _config.StartBrowser);
-        y += 26;
-
-        _cbNetPause = AddCheckBox("Auto-pause on public networks", 16, y, _config.NetworkAutoPause);
-        y += 26;
-
-        _cbSoundNotify = AddCheckBox("Play sounds on events", 16, y, _config.SoundNotifications);
-        y += 26;
-
-        _cbStopOnExit = AddCheckBox("Stop Syncthing when tray exits", 16, y, _config.StopOnExit);
-        y += 26;
-
-        // Windows startup delay — gap between tray launch and Syncthing launch.
-        // Primary use case is tray on Windows auto-startup: waiting a few seconds
-        // for the network stack and other boot services to settle before firing
-        // Syncthing. NumericUpDown lets the user spin in 5-second steps or type
-        // any value in [0, 3600] directly.
-        //
-        // v3.2.2: NUD is anchored off the label's autoscaled Right edge rather
-        // than a fixed x=160 design literal. At 125% DPI, "Windows startup delay:"
-        // measured ~169 physical-px starting at x=20, ending at ~189 — overflowing
-        // the NUD's autoscaled x=200 by enough that the label's "delay" text was
-        // visually rendering on top of (or to the right of) the NUD position,
-        // making the NUD appear as if it had been pushed below the label. Anchor
-        // pattern: get label.Right (physical-px post-autoscale), add a design-px
-        // gap converted via LogicalToDeviceUnits. The "seconds" label uses the
-        // same NUD-relative anchor for symmetry. See MicMute v2.1.x fix for the
-        // same anti-pattern (mixing live-DPI edges with design literals).
-        var lblDelay = AddLabel("Windows startup delay:", 16, y, 0, _normalFont, DimColor);
-        _nudDelay = new NumericUpDown
-        {
-            Location = new Point(160, y - 2), // placeholder, repositioned post-Add below
-            // Width=60 worked at 100% DPI but clipped digits at 125% — NumericUpDown's
-            // spinner band scales independently of the parent at non-100% scale (well-
-            // known WinForms quirk), eating ~25px and leaving no room for 4-digit values.
-            // MinimumSize is the floor AutoScaleMode.Dpi won't shrink past.
-            Width = 80,
-            MinimumSize = new Size(80, 26),
-            Minimum = 0,
-            Maximum = 3600,
-            Increment = 5,
-            Value = Math.Clamp(_config.StartupDelay, 0, 3600),
-            Font = _normalFont,
-            ForeColor = FgColor,
-            BackColor = EditBgColor,
-            BorderStyle = BorderStyle.FixedSingle,
-            TextAlign = HorizontalAlignment.Left,
-            AccessibleName = "Windows startup delay in seconds",
-        };
-        Controls.Add(_nudDelay);
-        _nudDelay.Location = new Point(
-            lblDelay.Right + LogicalToDeviceUnits(8),
-            lblDelay.Top - LogicalToDeviceUnits(2));
-
-        // v3.2.3: x=0 is a placeholder — the real Location is assigned on the
-        // next line off _nudDelay.Right post-autoscale. Passing 248 here was
-        // dead data left over from the pre-anchor pattern.
-        var lblSeconds = AddLabel("seconds", 0, y, 0, _normalFont, DimColor);
-        lblSeconds.Location = new Point(
-            _nudDelay.Right + LogicalToDeviceUnits(6),
-            lblDelay.Top);
-        y += 30;
+        // Windows startup delay — gap between tray launch and Syncthing launch (lets the
+        // network stack settle on auto-startup). Spin in 5s steps or type any value [0, 3600].
+        // DpiScale.SizeFitFields widens the NUD to its 4-digit Maximum at the device DPI.
+        _nudDelay = Fields.Numeric(0, 3600, _config.StartupDelay, width: 80, increment: 5);
+        _nudDelay.AccessibleName = "Windows startup delay in seconds";
+        card.FlowRow("Windows startup delay:", _nudDelay, Fields.Label("seconds"));
     }
 
-    private void BuildPathsSection(ref int y, int sw)
+    private void BuildPathsSection(CardStack stack)
     {
-        AddSectionHeader("Paths", 16, ref y, sw);
+        var card = stack.NewCard("\U0001F4C1", "Paths", Theme.AccentBlue);
 
-        AddLabel("Syncthing:", 16, y, 0, _normalFont, DimColor);
-        _edSyncExe = AddTextBox(90, y - 2, 220, _config.SyncExe, true, accessibleName: "Syncthing executable path");
-        // v3.2.2: width=32 (was 50) — "..." text is only ~8 design-px wide, so
-        // 32 design-px gives 24px chrome margin (12 each side) for a balanced
-        // ellipsis button at 100%. Scales to 40 physical-px at 125% — still
-        // tight around three dots, visually integrated with the textbox.
-        var btnBrowse = AddSizedButton("...", 32);
+        var btnBrowse = Fields.Button("...");
         btnBrowse.AccessibleName = "Browse for syncthing.exe";
-        btnBrowse.Location = new Point(
-            _edSyncExe.Right + LogicalToDeviceUnits(4),
-            _edSyncExe.Top - LogicalToDeviceUnits(1));
         btnBrowse.Click += OnBrowseSyncExe;
-        y += 28;
+        _edSyncExe = card.RowWith("Syncthing:", Fields.Text(220, mono: true), btnBrowse);
+        _edSyncExe.Text = _config.SyncExe;
+        _edSyncExe.AccessibleName = "Syncthing executable path";
 
-        AddLabel("Web UI:", 16, y, 0, _normalFont, DimColor);
-        _edWebUI = AddTextBox(90, y - 2, 220, _config.WebUI, true, accessibleName: "Syncthing Web UI URL");
-        // v3.2.2: width=54 (was 50 → "Ope" clip at 125%). "Open" measures ~28
-        // design-px; 54 gives 26 chrome margin (13 each side). At 125% physical
-        // = 67 px button vs 35 px text — comfortable.
-        var btnOpenWebUI = AddSizedButton("Open", 54);
+        var btnOpenWebUI = Fields.Button("Open");
         btnOpenWebUI.AccessibleName = "Open Web UI in browser";
-        btnOpenWebUI.Location = new Point(
-            _edWebUI.Right + LogicalToDeviceUnits(4),
-            _edWebUI.Top - LogicalToDeviceUnits(1));
         btnOpenWebUI.Click += (_, _) =>
         {
             var url = _edWebUI.Text.Trim();
@@ -272,7 +175,7 @@ internal sealed class SettingsForm : Form
             }
             try
             {
-                // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- url is validated as http/https via Uri.TryCreate on line 220 above; handed to Windows default browser
+                // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- url is validated as http/https via Uri.TryCreate above; handed to Windows default browser
                 using var p = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             }
             catch (Exception ex)
@@ -281,171 +184,167 @@ internal sealed class SettingsForm : Form
                 TrayLog.Warn("SettingsForm OpenWebUI failed: " + ex.Message);
             }
         };
-        y += 30;
+        _edWebUI = card.RowWith("Web UI:", Fields.Text(220, mono: true), btnOpenWebUI);
+        _edWebUI.Text = _config.WebUI;
+        _edWebUI.AccessibleName = "Syncthing Web UI URL";
     }
 
-    private void BuildApiSection(ref int y, int sw)
+    private void BuildApiSection(CardStack stack)
     {
-        AddSectionHeader("API", 16, ref y, sw);
+        var card = stack.NewCard("\U0001F511", "API", Theme.AccentBlue);
 
-        AddLabel("API Key:", 16, y, 0, _normalFont, DimColor);
-        // Textbox is narrower than the old 272px to make room for the reveal toggle.
-        // A Syncthing API key is ~40 chars; 216px @ Consolas-8 fits the key comfortably.
-        _edApiKey = AddTextBox(90, y - 2, 216, _config.ApiKey, true, accessibleName: "Syncthing API key");
+        // "" = Segoe MDL2 RedEye (show); "" = Hide (mask). The glyph is
+        // unreadable to assistive tech, hence the explicit AccessibleName.
+        var btnReveal = Fields.Button("", _iconFont);
+        btnReveal.AccessibleName = "Show or hide API key";
+
+        // A Syncthing API key is ~40 chars; a mono fill field fits it and stretches at any DPI.
+        _edApiKey = card.RowWith("API Key:", Fields.Text(216, mono: true), btnReveal);
+        _edApiKey.Text = _config.ApiKey;
         _edApiKey.UseSystemPasswordChar = true;
+        _edApiKey.AccessibleName = "Syncthing API key";
 
-        var btnReveal = new Button
-        {
-            // "\uE7B3" = Segoe MDL2 RedEye ("show"); "\uE7B4" = Hide ("mask").
-            // These render inside the password-toggle glyph set used across Win10/11.
-            Text = "\uE7B3",
-            Font = _iconFont,
-            // v3.2.2: width=40 (was 52) — single Segoe MDL2 glyph is ~14 design-px;
-            // 40 design-px gives 26px chrome margin (13 each side) for a tight,
-            // icon-sized button. AutoScaleMode.Dpi scales to 50 physical at 125%.
-            Location = new Point(0, 0), // placeholder, repositioned post-Add below
-            Size = new Size(40, 26),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = EditBgColor,
-            // TabStop = true + explicit AccessibleName so keyboard-only and
-            // screen-reader users can discover the reveal affordance. The glyph
-            // itself is unreadable to assistive tech — Segoe MDL2 "\uE7B3" has
-            // no semantic text.
-            TabStop = true,
-            AccessibleName = "Show or hide API key",
-        };
-        btnReveal.FlatAppearance.BorderColor = DividerColor;
         btnReveal.Click += (_, _) =>
         {
             _edApiKey.UseSystemPasswordChar = !_edApiKey.UseSystemPasswordChar;
-            btnReveal.Text = _edApiKey.UseSystemPasswordChar ? "\uE7B3" : "\uE7B4";
+            btnReveal.Text = _edApiKey.UseSystemPasswordChar ? "" : "";
         };
-        Controls.Add(btnReveal);
-        // v3.2.2: anchor off the textbox's autoscaled Right edge so the reveal
-        // icon stays adjacent at every DPI. LogicalToDeviceUnits converts the
-        // design-px gap to physical-px to match _edApiKey.Right's pixel space.
-        btnReveal.Location = new Point(
-            _edApiKey.Right + LogicalToDeviceUnits(4),
-            _edApiKey.Top - LogicalToDeviceUnits(1));
-
-        y += 30;
     }
 
-    private void BuildDiscoverySection(ref int y, int sw)
+    private void BuildDiscoverySection(CardStack stack)
     {
-        AddSectionHeader("Discovery", 16, ref y, sw);
+        var card = stack.NewCard("\U0001F310", "Discovery", Theme.AccentBlue);
 
-        // The HTTP probe used to run synchronously here — up to 1500 ms on the
-        // UI thread when Syncthing was up but slow, on top of the 300 ms-per-
-        // address IsReachable TCP probe. Total perceived lag on Settings open
-        // ranged from ~100 ms (Syncthing snappy) to ~2 s (slow API + IPv6 race
-        // on a hostname that resolved to [::1, 127.0.0.1] with v4-only listen).
-        // Now the dialog appears immediately with the checkboxes disabled; the
-        // probe runs on a pool thread via StartDiscoveryRetryTimer below and
-        // populates values within ~200-500 ms when Syncthing is responsive.
-        // Synchronous IsReachable is still acceptable (300 ms × N addresses,
-        // typically <50 ms when Syncthing is up) and lets us pick the right
-        // initial warn message without waiting for the HTTP call.
-        bool apiKeyEmpty = string.IsNullOrEmpty(_config.ApiKey);
-        bool reachable = !apiKeyEmpty && _api.IsReachable();
+        // Two columns: discovery toggles on the left, appearance (Theme) on the right,
+        // expressed relationally so they stay aligned at any DPI (the old layout pinned
+        // the Theme column to an absolute x=240 and fought overlap at 125%+).
+        var grid = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            Dock = DockStyle.Top,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.Transparent,
+        };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        // Capture the y-coordinates of the first two Discovery rows so the
-        // Theme: label + radio pair line up exactly with them on the right.
-        // The Theme control is hosted in the Discovery section per user request
-        // — visually grouped with other "appearance vs network" toggles, two
-        // lines tall on the right side of the section.
-        int themeLabelY = y;
-        _cbGlobal = AddCheckBox("Global Discovery", 16, y, false);
-        // v3.2.7: reverted v3.2.2's LogicalToDeviceUnits wrap. The v3.2.2 mental
-        // model was wrong: AutoScale doesn't fire on Controls.Add — it fires at
-        // Show (OnHandleCreated). So this post-Add assignment in the ctor is
-        // STILL design-px, and AutoScale handles the scaling correctly at Show.
-        // Under PerMonitorV2, Control.DeviceDpi pre-handle returns the process's
-        // primary monitor DPI (120 on a 125 % display), NOT 96 — so v3.2.2's
-        // LogicalToDeviceUnits(200) returned 250 pre-Show, then AutoScale at
-        // Show multiplied by 1.25 → 312.5 physical. _cbGlobal at x=20 physical
-        // ended at 332 physical, overlapping the Theme: column at x=300, and
-        // its opaque BackColor painted over the "The" of "Theme:" and the "D"
-        // + radio dot of "Dark". Plain literal lets AutoScale do its job.
-        _cbGlobal.Width = 200;
-        y += 24;
-        int themeRadioY = y;
-        _cbLocal = AddCheckBox("Local Discovery", 16, y, false);
-        _cbLocal.Width = 200;
-        y += 24;
-        _cbRelay = AddCheckBox("NAT Traversal (Relaying)", 16, y, false);
-        y += 24;
+        var checks = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 28, 0),
+            Padding = Padding.Empty,
+            BackColor = Color.Transparent,
+        };
+        _cbGlobal = Fields.Check("Global Discovery");
+        _cbLocal = Fields.Check("Local Discovery");
+        _cbRelay = Fields.Check("NAT Traversal (Relaying)");
+        foreach (var cb in new[] { _cbGlobal, _cbLocal, _cbRelay })
+        {
+            cb.Margin = new Padding(0, 3, 0, 3);
+            checks.Controls.Add(cb);
+        }
 
-        // ── Theme toggle (right column, two lines) ─────────────────────────
-        // Line 1 (themeLabelY): "Theme:" header. Line 2 (themeRadioY): two
-        // radio buttons "Dark" / "Light" side by side. Persists to AppConfig
-        // and applies on next launch — the SettingsForm Save path spawns a
-        // replacement process so this is seamless. See Theme.cs for the
-        // restart-to-apply rationale (GDI brush/pen caches captured at first
-        // class load can't be invalidated without a process restart).
-        const int ThemeColX = 240;
-        AddLabel("Theme:", ThemeColX, themeLabelY + 2, 0, _normalFont, DimColor);
-
-        bool currentlyDark = string.Equals(_config.ThemeMode, "Dark",
-            StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(_config.ThemeMode);
+        // Theme toggle - appearance grouped with the network toggles per user request.
+        // Persists to AppConfig and applies on next launch (Save spawns a replacement
+        // process; see Theme.cs for the restart-to-apply / GDI-cache rationale).
+        var themeCol = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.Transparent,
+        };
+        themeCol.Controls.Add(new Label
+        {
+            Text = "Theme:",
+            AutoSize = true,
+            ForeColor = Theme.Dim,
+            Font = CardFonts.Body,
+            Margin = new Padding(0, 4, 0, 2),
+        });
+        bool currentlyDark = string.Equals(_config.ThemeMode, "Dark", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrEmpty(_config.ThemeMode);
+        var radios = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Color.Transparent,
+        };
         _rbThemeDark = new RadioButton
         {
             Text = "Dark",
-            Font = _normalFont,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            Location = new Point(ThemeColX, themeRadioY),
-            Width = 64,
+            Font = CardFonts.Body,
+            ForeColor = Theme.Fg,
+            AutoSize = true,
             Checked = currentlyDark,
+            Margin = new Padding(0, 0, 12, 0),
             AccessibleName = "Dark theme",
         };
         _rbThemeLight = new RadioButton
         {
             Text = "Light",
-            Font = _normalFont,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            Location = new Point(ThemeColX + 64, themeRadioY),
-            Width = 64,
+            Font = CardFonts.Body,
+            ForeColor = Theme.Fg,
+            AutoSize = true,
             Checked = !currentlyDark,
             AccessibleName = "Light theme",
         };
-        Controls.Add(_rbThemeDark);
-        Controls.Add(_rbThemeLight);
+        radios.Controls.Add(_rbThemeDark);
+        radios.Controls.Add(_rbThemeLight);
+        themeCol.Controls.Add(radios);
 
-        // The three discovery boxes start DISABLED with `_discoveryReadOk = false`.
-        // ApplySettings gates the discovery PATCH on _discoveryReadOk so a Save
-        // before the async probe lands won't silently clobber Syncthing's existing
-        // state with default-false. The probe enables the boxes + sets the flag
-        // atomically (SuspendLayout / ResumeLayout) on success.
+        grid.Controls.Add(checks, 0, 0);
+        grid.Controls.Add(themeCol, 1, 0);
+        card.Full(grid);
+
+        // Persistent warn label - toggled by the async probe (SetDiscoveryWarn) instead of
+        // the old add-to-Controls / Remove churn (which assumed a flat form, not a card).
+        _discoveryWarnLabel = card.Hint(string.Empty);
+        _discoveryWarnLabel.Visible = false;
+
+        // Boxes start disabled; the async probe enables them + sets _discoveryReadOk so a
+        // Save before the probe lands cannot clobber Syncthing's state with default-false.
         _cbGlobal.Enabled = _cbLocal.Enabled = _cbRelay.Enabled = false;
         _discoveryReadOk = false;
 
+        bool apiKeyEmpty = string.IsNullOrEmpty(_config.ApiKey);
+        bool reachable = !apiKeyEmpty && _api.IsReachable();
         if (apiKeyEmpty)
         {
-            // No key → can't probe and can't recover by retry. Static label.
-            _discoveryWarnLabel = AddLabel("(set API Key above to manage discovery)", 36, y, 320, _subFont, WarnLabelColor);
-            y += 18;
+            SetDiscoveryWarn("(set API Key above to manage discovery)");
         }
         else if (!reachable)
         {
-            // Syncthing not listening on the WebUI port. Show the warn and arm
-            // the retry timer — when it comes up, the probe will swap the label
-            // out and enable the boxes.
-            _discoveryWarnLabel = AddLabel("(could not read current state — API unreachable)", 36, y, 320, _subFont, WarnLabelColor);
-            y += 18;
+            SetDiscoveryWarn("(could not read current state - API unreachable)");
             StartDiscoveryRetryTimer();
         }
         else
         {
-            // Reachable. Kick off the async probe — the dialog is already
-            // visible by the time it lands. No warn label initially; the retry
-            // timer's timeout path (60 s with no successful probe) will
-            // surface a recovery hint via the warn label it lazily creates.
             StartDiscoveryRetryTimer();
         }
-        y += 6;
+    }
+
+    /// <summary>Show/replace the Discovery warning text, or hide it when null/empty. Replaces
+    /// the pre-rebuild add/remove-from-Controls dance now that the label lives in a card.</summary>
+    private void SetDiscoveryWarn(string? text)
+    {
+        if (_discoveryWarnLabel == null || _discoveryWarnLabel.IsDisposed) return;
+        if (string.IsNullOrEmpty(text)) { _discoveryWarnLabel.Visible = false; return; }
+        _discoveryWarnLabel.Text = text;
+        _discoveryWarnLabel.Visible = true;
     }
 
     private void StartDiscoveryRetryTimer()
@@ -480,26 +379,7 @@ internal sealed class SettingsForm : Form
             // reachable-at-start path (no initial label was created then).
             // After 60 s of failures we owe the user some explanation
             // beyond "boxes are mysteriously disabled."
-            if (_discoveryWarnLabel == null || _discoveryWarnLabel.IsDisposed)
-            {
-                // v3.2.2: AddLabel takes (x, y) in design-px and autoscales them
-                // on Controls.Add. _cbRelay.Bottom is already physical-px (post-
-                // autoscale), so passing it as the y argument double-scales it
-                // (at 125% the label would land ~31% below the relay checkbox
-                // instead of immediately under it). Pass 0 as placeholder, then
-                // set Location in physical-px afterward — convert the 36 x-offset
-                // and the 4 gap via LogicalToDeviceUnits to stay proportional.
-                _discoveryWarnLabel = AddLabel(
-                    "(Syncthing unreachable — reopen Settings to retry)",
-                    0, 0, 320, _subFont, WarnLabelColor);
-                _discoveryWarnLabel.Location = new Point(
-                    LogicalToDeviceUnits(36),
-                    _cbRelay.Bottom + LogicalToDeviceUnits(4));
-            }
-            else
-            {
-                _discoveryWarnLabel.Text = "(Syncthing unreachable — reopen Settings to retry)";
-            }
+            SetDiscoveryWarn("(Syncthing unreachable - reopen Settings to retry)");
             return;
         }
 
@@ -553,12 +433,7 @@ internal sealed class SettingsForm : Form
                         _cbGlobal.Enabled = _cbLocal.Enabled = _cbRelay.Enabled = true;
                         _discoveryReadOk = true;
 
-                        if (_discoveryWarnLabel != null)
-                        {
-                            Controls.Remove(_discoveryWarnLabel);
-                            _discoveryWarnLabel.Dispose();
-                            _discoveryWarnLabel = null;
-                        }
+                        SetDiscoveryWarn(null);
                     }
                     finally
                     {
@@ -579,22 +454,13 @@ internal sealed class SettingsForm : Form
 
     private bool _discoveryReadOk;
 
-    private void BuildUpdatesSection(ref int y, int sw)
+    private void BuildUpdatesSection(CardStack stack)
     {
-        AddSectionHeader("Updates", 16, ref y, sw);
+        var card = stack.NewCard("⬆", "Updates", Theme.AccentBlue);
 
-        _cbAutoUpdates = AddCheckBox("Check for Syncthing updates (daily)", 16, y, _config.AutoCheckUpdates);
-        // v3.2.7: reverted v3.2.2's LogicalToDeviceUnits wrap — see _cbGlobal
-        // comment in BuildDiscoverySection. Raw design literal is correct;
-        // AutoScale at Show handles the DPI scaling.
-        _cbAutoUpdates.Width = 220;
-        // v3.2.2: width=92 (was 90) — "Check Now" is ~56 design-px; 92 gives
-        // 36px chrome margin (18 each side). Anchored off the checkbox's
-        // autoscaled Right edge using LogicalToDeviceUnits gap.
-        var btnCheckNow = AddSizedButton("Check Now", 92);
-        btnCheckNow.Location = new Point(
-            _cbAutoUpdates.Right + LogicalToDeviceUnits(10),
-            _cbAutoUpdates.Top - LogicalToDeviceUnits(2));
+        _cbAutoUpdates = Fields.Check("Check for Syncthing updates (daily)", _config.AutoCheckUpdates);
+        var btnCheckNow = Fields.Button("Check Now");
+        btnCheckNow.AccessibleName = "Check Now";
         btnCheckNow.Click += async (_, _) =>
         {
             // Double-click guard: the _api.Get HTTP call below is now async
@@ -703,116 +569,71 @@ internal sealed class SettingsForm : Form
                 if (!_disposed && !IsDisposed) btnCheckNow.Enabled = true;
             }
         };
-        // v3.2.3: AddSizedButton already calls Controls.Add internally. A second
-        // Controls.Add(btnCheckNow) here was harmless (WinForms silently no-ops
-        // duplicate adds to the same parent) but inconsistent with the other
-        // five AddSizedButton callers and confusing for readers.
-        y += 30;
-
-        AddDivider(0, y, sw);
-        y += 8;
+        card.FlowRow(string.Empty, _cbAutoUpdates, btnCheckNow);
     }
 
-    private void BuildButtonRow(ref int y, int sw)
+    private void BuildButtonRow(CardStack stack)
     {
-        // v3.2.2: top row buttons keep their hand-tuned fixed-Size shape (Size
-        // = new Size(w, 26)) but two were too tight pre-v3.2.2 — Syncthing(68)
-        // clipped to "Syncthi" at 125% DPI and Check Config(100) clipped to
-        // "Check Confi" on the same display. Bumped Syncthing 68 → 82 and
-        // Check Config 100 → 98 with the chrome margin balanced across the
-        // row so the whole top row reads with a uniform visual rhythm.
-        // Positions chain off the prior button's autoscaled Right edge using
-        // LogicalToDeviceUnits(BtnGap) so device-px and design-px don't get
-        // mixed in the same expression (the MicMute v2.1.x anti-pattern).
-        //
-        // Bottom row: Save(114) | Apply(114) | Cancel(114) stays at fixed widths
-        // — 114 design-px is wide enough for 6-char "Cancel" at 9pt Segoe UI
-        // even at 200% DPI, and the trio's symmetry depends on uniform width.
+        // Top row: links + actions (left-aligned). Bottom row: Save / Apply / Cancel hug
+        // the right edge. AutoSize buttons grow to their text at any DPI, so the old
+        // per-button hand-tuned widths and clip-avoidance comments are gone.
+        Button Link(string text, string url)
+        {
+            var b = Fields.Button(text);
+            b.Click += (_, _) =>
+            {
+                // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- hardcoded GitHub URLs only
+                using var p = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            };
+            return b;
+        }
 
-        // v3.2.6: Update 62 → 78 (was clipping to "Updat" at 125 % — the +6 from
-        // v3.2.2 wasn't enough on the 125 % display; +16 gives ~38 px of chrome
-        // margin around "Update" text ~40 design-px). Check Config 98 → 114
-        // (was clipping to "Check" at 125 % — same story, +18 gives ~40 px
-        // chrome margin around "Check Config" ~75 design-px). Hand-tuned chrome
-        // margins now ~30-40 % of button width, enough that DPI auto-scaling
-        // at 125-200 % can't eat through them. Form sw was widened 410 → 440
-        // to accommodate the bumps without crowding GitHub/Syncthing/Help.
-        //   16 (margin) + GitHub(72) + Update(78) + Syncthing(82) + Help(52)
-        //                + Check Config(114) + 4*BtnGap(5) = 434, leaves 6 px
-        //                right margin at sw=440.
-        const int BtnGap = 5;
+        var btnGitHub = Link("GitHub", "https://github.com/itsnateai/syncthingpause");
 
-        var btnGitHub = AddLinkButton("GitHub", 16, y, 72, "https://github.com/itsnateai/syncthingpause");
-
-        var btnUpdate = AddSizedButton("Update", 78);
-        btnUpdate.Location = new Point(btnGitHub.Right + LogicalToDeviceUnits(BtnGap), btnGitHub.Top);
+        var btnUpdate = Fields.Button("Update");
         btnUpdate.Click += (_, _) =>
         {
             using var dlg = new UpdateDialog();
             dlg.ShowDialog(this);
         };
 
-        var btnSyncthing = AddLinkButton("Syncthing", 0, y, 82, "https://github.com/syncthing/syncthing");
-        btnSyncthing.Location = new Point(btnUpdate.Right + LogicalToDeviceUnits(BtnGap), btnGitHub.Top);
+        var btnSyncthing = Link("Syncthing", "https://github.com/syncthing/syncthing");
 
-        var btnHelp = AddSizedButton("Help", 52);
-        btnHelp.Location = new Point(btnSyncthing.Right + LogicalToDeviceUnits(BtnGap), btnGitHub.Top);
+        var btnHelp = Fields.Button("Help");
         btnHelp.Click += (_, _) =>
         {
             using var hf = new HelpForm(_config.SettingsFilePath, (msg, ms) => _osd.ShowMessage(msg, ms));
             hf.ShowDialog(this);
         };
 
-        var btnCheck = AddSizedButton("Check Config", 114);
-        btnCheck.Location = new Point(btnHelp.Right + LogicalToDeviceUnits(BtnGap), btnGitHub.Top);
+        var btnCheck = Fields.Button("Check Config");
         btnCheck.AccessibleName = "Check Config";
         btnCheck.Click += OnCheckConfig;
-        y += 34;
 
-        // v3.2.6: bottom row Save/Apply/Cancel re-centered for the new sw=440.
-        // Sum = 3*114 + 2*18 = 378. Left margin = (440 - 378) / 2 = 31, giving
-        // symmetric 31 px left + right margins. Pre-v3.2.6 was hardcoded at
-        // x=16/148/280 which left a lopsided 16 left / 46 right margin in the
-        // wider form. Positions are still design-px (autoscaled at Controls.Add).
-        var btnSave = new Button
+        var top = new FlowLayoutPanel
         {
-            Text = "Save",
-            Font = _normalFont,
-            Location = new Point(31, y),
-            Size = new Size(114, 30),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = Padding.Empty,
+            BackColor = Color.Transparent,
         };
+        foreach (var b in new[] { btnGitHub, btnUpdate, btnSyncthing, btnHelp, btnCheck })
+        {
+            b.Margin = new Padding(0, 0, 6, 0);
+            top.Controls.Add(b);
+        }
+        stack.AddFullWidth(top);
+
+        var btnSave = Fields.Primary("Save");
         btnSave.Click += OnSave;
-        Controls.Add(btnSave);
-
-        var btnApply = new Button
-        {
-            Text = "Apply",
-            Font = _normalFont,
-            Location = new Point(163, y),
-            Size = new Size(114, 30),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-        };
+        var btnApply = Fields.Button("Apply");
         btnApply.Click += OnApply;
-        Controls.Add(btnApply);
-
-        var btnCancel = new Button
-        {
-            Text = "Cancel",
-            Font = _normalFont,
-            Location = new Point(295, y),
-            Size = new Size(114, 30),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            DialogResult = DialogResult.Cancel,
-        };
+        var btnCancel = Fields.Button("Cancel");
+        btnCancel.DialogResult = DialogResult.Cancel;
         btnCancel.Click += (_, _) => Close();
-        Controls.Add(btnCancel);
+        stack.AddFullWidth(Bars.Split(Array.Empty<Control>(), new Control[] { btnSave, btnApply, btnCancel }));
 
         AcceptButton = btnSave;
         CancelButton = btnCancel;
@@ -1274,194 +1095,6 @@ internal sealed class SettingsForm : Form
         }
     }
 
-    // --- UI Helpers ---
-
-    private Label AddLabel(string text, int x, int y, int w, Font font, Color color)
-    {
-        var lbl = new Label
-        {
-            Text = text,
-            Font = font,
-            ForeColor = color,
-            BackColor = BgColor,
-            Location = new Point(x, y),
-            AutoSize = w <= 0,
-        };
-        if (w > 0) lbl.Width = w;
-        Controls.Add(lbl);
-        return lbl;
-    }
-
-    private Label AddDivider(int x, int y, int w)
-    {
-        var lbl = new Label
-        {
-            Location = new Point(x, y),
-            Size = new Size(w, 1),
-            BackColor = DividerColor,
-        };
-        Controls.Add(lbl);
-        return lbl;
-    }
-
-    private CheckBox AddCheckBox(string text, int x, int y, bool isChecked)
-    {
-        var cb = new CheckBox
-        {
-            Text = text,
-            Font = _normalFont,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            Location = new Point(x, y),
-            Width = 320,
-            Checked = isChecked,
-            // WinForms CheckBox already exposes Text as AccessibleName by default
-            // for screen readers, but setting it explicitly keeps the contract
-            // uniform across every control in this form.
-            AccessibleName = text,
-        };
-        Controls.Add(cb);
-        return cb;
-    }
-
-    private TextBox AddTextBox(int x, int y, int w, string text, bool useMono = false, string? accessibleName = null)
-    {
-        var tb = new TextBox
-        {
-            Text = text,
-            Font = useMono ? _monoFont : _normalFont,
-            ForeColor = FgColor,
-            BackColor = EditBgColor,
-            Location = new Point(x, y),
-            Width = w,
-            // Note: TextBox auto-sizes its Height to fit Font when Multiline=false
-            // (per MS AutoScaleMode docs, TextBox/Label use Font scaling regardless
-            // of AutoScaleMode). The Height = 24 literal is treated as a minimum
-            // intent for layout consistency with the NUD at MinimumSize.Height=26
-            // and surrounding buttons at 26 — the actual rendered height tracks
-            // Font.Height + chrome at the current monitor's DPI.
-            Height = 24,
-            BorderStyle = BorderStyle.FixedSingle,
-        };
-        if (accessibleName is not null) tb.AccessibleName = accessibleName;
-        Controls.Add(tb);
-        return tb;
-    }
-
-    private ComboBox AddComboBox(int x, int y, int w, string[] items, int selectedIndex, string? accessibleName = null)
-    {
-        var cb = new ComboBox
-        {
-            Font = _normalFont,
-            ForeColor = FgColor,
-            BackColor = EditBgColor,
-            Location = new Point(x, y),
-            Width = w,
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            FlatStyle = FlatStyle.Flat,
-            DrawMode = DrawMode.OwnerDrawFixed,
-            // ItemHeight set below AFTER Controls.Add so cb.DeviceDpi reports the
-            // form's actual current monitor DPI. AutoScaleMode.Dpi does NOT scale
-            // ItemHeight (it's an int property, not a Size, so the auto-scale walk
-            // skips it). Font.Height alone is computed against the screen DC at
-            // 96 DPI design metrics — stays ~15px regardless of monitor, so
-            // ItemHeight would clip at 150%+ scale where the rendered 9pt Segoe UI
-            // is ~23px tall. Font.GetHeight(deviceDpi) returns the actual physical
-            // pixel height at this monitor's DPI; LogicalToDeviceUnits scales the
-            // 4px chrome padding to match. Together they produce a row that fits
-            // glyphs at every DPI from 100% to 250%.
-        };
-        if (accessibleName is not null) cb.AccessibleName = accessibleName;
-        cb.DrawItem += OnDrawComboItem;
-        cb.Items.AddRange(items);
-        cb.SelectedIndex = selectedIndex;
-        Controls.Add(cb);
-        cb.ItemHeight = (int)Math.Ceiling(cb.Font.GetHeight(cb.DeviceDpi)) + cb.LogicalToDeviceUnits(4);
-        return cb;
-    }
-
-    private static void OnDrawComboItem(object? sender, DrawItemEventArgs e)
-    {
-        if (e.Index < 0 || sender is not ComboBox cb) return;
-
-        bool selected = (e.State & DrawItemState.Selected) != 0;
-        e.Graphics.FillRectangle(selected ? ComboSelectedBrush : ComboBgBrush, e.Bounds);
-
-        var text = cb.Items[e.Index]?.ToString() ?? string.Empty;
-        TextRenderer.DrawText(e.Graphics, text, cb.Font, e.Bounds, FgColor,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
-    }
-
-    private void AddSectionHeader(string text, int x, ref int y, int sw)
-    {
-        y += 4;
-        var lbl = AddLabel(text, x, y, 0, _sectionFont, DimColor); // AutoSize
-        // v3.2.3: TextRenderer.MeasureText returns device-px at the form's current
-        // DeviceDpi. Mixing it with x/sw design-px and feeding the result to
-        // AddDivider (whose Location/Size autoscale on Controls.Add) double-counted
-        // the DPI ratio — the divider drifted right by ~25% of labelWidth at 125%
-        // DPI. Convert the measurement back to design-px before mixing so the
-        // subsequent autoscale lands the divider at the intended physical px.
-        int labelWidthDevice = TextRenderer.MeasureText(text, _sectionFont).Width;
-        int labelWidthDesign = (int)Math.Ceiling(labelWidthDevice * 96.0 / DeviceDpi);
-        int labelEnd = x + labelWidthDesign + 4;
-        AddDivider(labelEnd, y + 7, sw - labelEnd - 10);
-        y += 20;
-    }
-
-    /// <summary>
-    /// Fixed-size variant — caller supplies the design-px width, which the form's
-    /// AutoScaleMode.Dpi walk scales up at runtime. AutoSize was tried in v3.2.2's
-    /// first draft but Button.AutoSize with custom Padding stacks on top of the
-    /// Button's internal chrome margin and produces oversized buttons (taller than
-    /// adjacent textboxes, wider than the hand-tuned widths the form has shipped
-    /// against since v2.0). Hand-tuning the width per button gives uniform visual
-    /// rhythm at 100% scale and the AutoScaleMode walk handles the rest.
-    /// Returns the button so callers can chain Location off the autoscaled Right.
-    /// </summary>
-    private Button AddLinkButton(string text, int x, int y, int w, string url)
-    {
-        var btn = new Button
-        {
-            Text = text,
-            Font = _btnFont,
-            Location = new Point(x, y),
-            Size = new Size(w, 26),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            AccessibleName = text,
-        };
-        btn.Click += (_, _) =>
-        {
-            // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- AddLinkButton is only called with hardcoded URLs (github.com/itsnateai/syncthingpause, github.com/syncthing/syncthing)
-            using var p = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        };
-        Controls.Add(btn);
-        return btn;
-    }
-
-    /// <summary>
-    /// Fixed-size row button — twin of <see cref="AddLinkButton"/> minus the link
-    /// click handler. Used for Update / Help / Check Config / Check Now / Browse
-    /// / Open. Caller supplies design-px width; AutoScaleMode handles DPI scaling.
-    /// Callers chain Location off the prior sibling's Right post-Add.
-    /// </summary>
-    private Button AddSizedButton(string text, int w)
-    {
-        var btn = new Button
-        {
-            Text = text,
-            Font = _btnFont,
-            Size = new Size(w, 26),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = FgColor,
-            BackColor = BgColor,
-            AccessibleName = text,
-        };
-        Controls.Add(btn);
-        return btn;
-    }
 
     private static bool IsSyncthingRunning()
     {
@@ -1519,12 +1152,6 @@ internal sealed class SettingsForm : Form
                 _discoveryRetryTimer?.Dispose();
                 _discoveryRetryTimer = null;
 
-                _boldFont.Dispose();
-                _normalFont.Dispose();
-                _sectionFont.Dispose();
-                _monoFont.Dispose();
-                _btnFont.Dispose();
-                _subFont.Dispose();
                 _iconFont.Dispose();
             }
         }

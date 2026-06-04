@@ -62,3 +62,7 @@ IMPLEMENTATION_PROMPT*.md
 
 # WinGet manifest staging (wingetcreate.exe + per-version manifests; regeneratable per release)
 _winget-staging/
+
+# DPI verification scratch renders + local design docs (reference internal test infra; keep local)
+_dpi-renders/
+docs/plans/
