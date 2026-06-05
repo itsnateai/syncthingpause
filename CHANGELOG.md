@@ -4,6 +4,21 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.17 — 2026-06-05
+
+### Internal: post-ship verification hardening (no user-facing change)
+
+The v3.2.16 combo-bleed fix is correct and shipped — this release only hardens the code and test around it after a verification swarm (6 topic agents, Sonnet + Opus, plus an orchestrator-side `/code-review`) flagged two latent issues. The binary behaves identically to v3.2.16; this exists to keep `main` and the published release in lockstep.
+
+- **Killed a silent-skip path.** The two click-action combos were typed `ComboBox`, and Load read their `OverflowBelow` behind an `is ThemedComboBox` cast — if a future edit ever built one as a plain `ComboBox`, the overflow reservation would be silently skipped and the bleed would return undetected. The fields are now typed `ThemedComboBox`, so the cast is gone and a type change fails to compile (loud by construction).
+- **Made the regression test non-vacuous.** The new v3.2.16 combo guard asserted `Margin.Bottom > 2`, but the breathing-room term (`LogicalToDeviceUnits(4)`) alone cleared that threshold — so the test would have passed even if the load-bearing `OverflowBelow` reservation were dropped. It now asserts `OverflowBelow > 0` *and* `Margin.Bottom > (baseline + breathing)`, deriving both inputs from live control state and a shared `ClickComboBottomBreathingPx` constant rather than hardcoded literals that could drift from the implementation.
+
+### What's underneath
+
+- **`SyncthingPause/SettingsForm.cs`** — `_cboDblClick` / `_cboMiddleClick` retyped `ComboBox` → `ThemedComboBox` (cast removed in Load); breathing-room literal `4` promoted to the named `ClickComboBottomBreathingPx` constant.
+- **`SyncthingPause.Tests/DpiLayoutRegressionTests.cs`** — combo guard tightened to prove the `OverflowBelow` term is actually reserved; threshold derived from `Margin.Top` + the shared constant.
+- **`SyncthingPause.csproj`** — 3.2.16 → 3.2.17.
+
 ## v3.2.16 — 2026-06-04
 
 ### Settings dialog: the combo bleed (for real this time) + wider action buttons
