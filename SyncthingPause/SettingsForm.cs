@@ -185,8 +185,8 @@ internal sealed class SettingsForm : Form
         // network stack settle on auto-startup). Spin in 5s steps or type any value [0, 3600].
         // 58px is sized for the realistic value (a 1–2 digit delay, default 20) rather than the
         // bulky 4-digit-max width — yet still clears "3600" + spinner at 100% (~51px content) and
-        // at 150% (AutoScaleMode scales the width with the font), so the [0, 3600] max that
-        // AppConfig's load clamp depends on stays uncapped. Narrower would risk clipping the max.
+        // at 150% (AutoScaleMode.Dpi scales the 58px by the DPI ratio → ~87px), so the [0, 3600]
+        // max that AppConfig's load clamp depends on stays uncapped. Narrower would risk clipping.
         _nudDelay = Fields.Numeric(0, 3600, _config.StartupDelay, width: 58, increment: 5);
         _nudDelay.AccessibleName = "Windows startup delay in seconds";
         card.FlowRow("Windows startup delay:", _nudDelay, Fields.Label("seconds"));
