@@ -624,4 +624,80 @@ public class AppConfigTests
         var cfg = new AppConfig(_tempDir);
         Assert.AreEqual("Light", cfg.ThemeMode);
     }
+
+    // ── Window position persistence (Settings dialog remembers where it closed) ──
+
+    [TestMethod]
+    public void WindowPosition_DefaultsNull_OnFirstRun()
+    {
+        // Never closed → nothing to restore → SettingsForm keeps CenterScreen.
+        var config = new AppConfig(_tempDir);
+        Assert.IsNull(config.WindowX);
+        Assert.IsNull(config.WindowY);
+    }
+
+    [TestMethod]
+    public void WindowPosition_RoundTrips()
+    {
+        var written = new AppConfig(_tempDir) { WindowX = 640, WindowY = 360 };
+        written.Save();
+
+        var loaded = new AppConfig(_tempDir);
+        Assert.AreEqual(640, loaded.WindowX);
+        Assert.AreEqual(360, loaded.WindowY);
+    }
+
+    [TestMethod]
+    public void WindowPosition_OmittedFromIni_WhenNeverSet()
+    {
+        // A pristine first-run Save (user never moved the dialog) must not pollute
+        // the INI with cosmetic position keys.
+        var config = new AppConfig(_tempDir);
+        config.Save();
+
+        var ini = File.ReadAllText(config.SettingsFilePath);
+        Assert.IsFalse(ini.Contains("WindowX"), "WindowX must not be written until captured");
+        Assert.IsFalse(ini.Contains("WindowY"), "WindowY must not be written until captured");
+    }
+
+    [TestMethod]
+    public void WindowPosition_NegativeCoords_RoundTrip()
+    {
+        // A monitor positioned LEFT of / ABOVE the primary has negative virtual-screen
+        // coords. A naive `>= 0` parse would silently drop the saved position and the
+        // dialog would jump back to center for that (common) multi-monitor layout.
+        var written = new AppConfig(_tempDir) { WindowX = -1280, WindowY = -200 };
+        written.Save();
+
+        var loaded = new AppConfig(_tempDir);
+        Assert.AreEqual(-1280, loaded.WindowX);
+        Assert.AreEqual(-200, loaded.WindowY);
+    }
+
+    [TestMethod]
+    public void WindowPosition_PartialKey_TreatedAsUnset()
+    {
+        // Both keys must parse together. A half-written INI (WindowX but no WindowY —
+        // a truncated write, a hand edit) must fall back to "no saved position" rather
+        // than restore at (X, 0), which could pin the dialog to the screen's top edge.
+        var iniPath = Path.Combine(_tempDir, "SyncthingPause.ini");
+        File.WriteAllText(iniPath, "[Settings]\nApiKey=abc\nWindowX=500\n", new UTF8Encoding(false));
+
+        var config = new AppConfig(_tempDir);
+        Assert.IsNull(config.WindowX);
+        Assert.IsNull(config.WindowY);
+    }
+
+    [TestMethod]
+    public void WindowPosition_NonNumericValue_TreatedAsUnset()
+    {
+        // Garbage value (corrupt write, manual fat-finger) must not throw and must not
+        // restore — leave it null so the dialog centers.
+        var iniPath = Path.Combine(_tempDir, "SyncthingPause.ini");
+        File.WriteAllText(iniPath, "[Settings]\nWindowX=left\nWindowY=top\n", new UTF8Encoding(false));
+
+        var config = new AppConfig(_tempDir);
+        Assert.IsNull(config.WindowX);
+        Assert.IsNull(config.WindowY);
+    }
 }

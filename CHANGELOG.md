@@ -4,6 +4,26 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.18 — 2026-06-05
+
+### Settings dialog remembers where you left it
+
+The Settings window now reopens at the position you last closed it, instead of always re-centering. Previously it was hardcoded to `CenterScreen` with no persistence — there was no position memory at all, so dragging it somewhere and reopening always snapped it back to the middle of the screen.
+
+- **It remembers every close path.** Move the window and close it via Save, Apply, Cancel, the X, or Alt+F4 — the position is captured each time and restored next open. The last-closed `(X, Y)` lands in `SyncthingPause.ini` (`WindowX` / `WindowY`); a pristine first-run INI stays clean (the keys aren't written until the dialog has actually been moved-and-closed once).
+- **It can't strand the dialog off-screen.** Before restoring, it checks the saved point is still reachable on a *currently-connected* screen — enough of the title bar must land on a working area to be grabbable. If you saved it on a monitor that's since been unplugged or had its resolution shrunk, it recovers to center on the screen under your cursor instead of opening on a phantom display where you can't see or reach it.
+- **No surprise rewrites.** Closing the dialog never rewrites a locked or corrupt `SyncthingPause.ini` just from viewing settings, never persists abandoned edits (a Cancel writes back the live values unchanged, plus the new position), and a vetoed close is a no-op.
+
+### What's underneath
+
+- **`SyncthingPause/AppConfig.cs`** — new nullable `WindowX` / `WindowY`; parsed in `Load()` (both keys required or it stays unset, negatives allowed for monitors left-of / above primary) and written in `Save()` only once captured.
+- **`SyncthingPause/SettingsForm.cs`** — ctor picks `StartPosition` Manual-if-saved else the original `CenterScreen`; `Load` calls `RestorePosition()` once the window size is final; `IsTitleBarReachable()` validates the saved point against `Screen.AllScreens` in physical-pixel space (fixed thresholds, deliberately *not* `LogicalToDeviceUnits` — that scales by the form's monitor, skewing a mixed-DPI multi-monitor check); `CenterOnActiveWorkArea()` is the off-screen recovery; `OnFormClosing` captures the position, honors `e.Cancel`, skips locked/corrupt INIs, and fails loud (`TrayLog.Warn`) if the save can't be written.
+- **`SyncthingPause.Tests/AppConfigTests.cs`** — 6 round-trip / edge tests (null default, round-trip, omitted-when-unset, negative coords, partial-key → unset, non-numeric → unset).
+- **`SyncthingPause.Tests/SettingsPositionTests.cs`** — 3 integration tests realizing a real `SettingsForm` on an STA thread: on-screen restore is honored verbatim, off-screen saved position recovers to a visible screen, and a moved-then-closed dialog persists through the INI for the next open.
+- **`SyncthingPause.csproj`** — 3.2.17 → 3.2.18.
+
+Verified: build clean (0 warnings), 108/108 tests pass, plus a 6-agent adversarial review (Sonnet + Opus × Diff-clean / Gap-audit / Code-review) that caught three real fixes now applied (honor `e.Cancel`, fail-loud on save failure, mixed-DPI coordinate-space fix).
+
 ## v3.2.17 — 2026-06-05
 
 ### Internal: post-ship verification hardening (no user-facing change)

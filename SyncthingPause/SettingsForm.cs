@@ -14,6 +14,11 @@ internal sealed class SettingsForm : Form
     private readonly OsdToolTip _osd;
     private bool _disposed;
 
+    // True when a saved window position exists in config and should be restored in
+    // Load (after on-screen validation). Drives the Manual-vs-CenterScreen choice in
+    // the ctor — see the StartPosition assignment and RestorePosition().
+    private readonly bool _restoreSavedPos;
+
     // Controls we need to read on Save (assigned in Build* methods). The two click-action
     // combos are typed ThemedComboBox (not ComboBox) so Load can read OverflowBelow with no
     // cast — the overflow reservation can't be silently skipped, and if either is ever built
@@ -90,7 +95,14 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowIcon = false;
-        StartPosition = FormStartPosition.CenterScreen;
+        // Reopen where the user last closed the dialog. When a saved position exists we
+        // take Manual control: CenterScreen re-centers at show time — AFTER the Load
+        // handler runs — which would clobber a restore set there. With no saved position
+        // yet, keep the original CenterScreen default untouched. The saved point is
+        // validated against the connected screens in RestorePosition() before it's
+        // trusted, so a monitor that's since been unplugged can't strand the dialog.
+        _restoreSavedPos = _config.WindowX is not null && _config.WindowY is not null;
+        StartPosition = _restoreSavedPos ? FormStartPosition.Manual : FormStartPosition.CenterScreen;
         TopMost = true;
         BackColor = BgColor;
         ShowInTaskbar = false;
@@ -176,6 +188,11 @@ internal sealed class SettingsForm : Form
             // The footer's button rows don't scroll horizontally, so the form must fit them too.
             w = Math.Max(w, stack.Footer?.PreferredSize.Width ?? 0);
             ClientSize = new Size(w, cardsH + footerH);
+
+            // Cards + footer are now sized, so Width/Height are final. Restore the saved
+            // position here (not in the ctor) because off-screen validation needs the
+            // finalized window size to know whether the title bar would land on-screen.
+            RestorePosition();
         };
 
         // First-run auto-open can land behind a fullscreen app (game, video) since
@@ -1243,6 +1260,94 @@ internal sealed class SettingsForm : Form
             TrayLog.Warn($"ParseJsonBool({key}): {ex.Message}");
             return defaultValue;
         }
+    }
+
+    /// <summary>
+    /// Position the dialog at the user's last-closed location when it's still reachable
+    /// on a connected screen; otherwise recover to center. Called from Load once
+    /// Width/Height are finalized (off-screen validation needs the real window size).
+    /// </summary>
+    private void RestorePosition()
+    {
+        if (!_restoreSavedPos) return;   // no saved position → ctor left StartPosition = CenterScreen
+        var saved = new Rectangle(_config.WindowX!.Value, _config.WindowY!.Value, Width, Height);
+        if (IsTitleBarReachable(saved))
+            Location = saved.Location;
+        else
+            CenterOnActiveWorkArea();     // saved monitor unplugged / resolution shrank → don't strand it
+    }
+
+    /// <summary>
+    /// True when enough of the window's title-bar strip lands inside some connected
+    /// screen's working area that the user could grab and drag it. Rejects positions
+    /// saved on a monitor that's since been removed (coords now in dead space) while
+    /// still allowing a window the user deliberately nudged a little past an edge. The
+    /// two thresholds are the tunable knob for how strict "on-screen enough" is.
+    /// </summary>
+    private static bool IsTitleBarReachable(Rectangle windowBounds)
+    {
+        // Compare in PHYSICAL-pixel space: Screen.WorkingArea and a top-level window's
+        // bounds are both physical pixels on the virtual desktop, so the thresholds are
+        // fixed physical px — deliberately NOT run through LogicalToDeviceUnits, which
+        // scales by the FORM's current-monitor DPI. On a mixed-DPI multi-monitor setup
+        // that differs from the target monitor's DPI and skews the test toward spurious
+        // re-centering. ~120px of grabbable title bar is plenty to click at any scale
+        // (60 logical px even at 200%).
+        const int stripH = 36;       // top band of the window that must overlap a work area
+        const int minVisible = 120;  // horizontal run of title bar that must be on-screen
+        var titleStrip = new Rectangle(windowBounds.X, windowBounds.Y, windowBounds.Width, stripH);
+        foreach (var screen in Screen.AllScreens)
+        {
+            var overlap = Rectangle.Intersect(screen.WorkingArea, titleStrip);
+            if (overlap.Width >= minVisible && overlap.Height >= stripH / 2)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Center on the working area of the screen under the cursor (where the user just
+    /// clicked the tray icon) — the recovery target when the saved position is
+    /// off-screen. StartPosition is Manual on this path, so WinForms won't center for us.
+    /// </summary>
+    private void CenterOnActiveWorkArea()
+    {
+        var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+        Location = new Point(
+            wa.Left + Math.Max(0, (wa.Width - Width) / 2),
+            wa.Top + Math.Max(0, (wa.Height - Height) / 2));
+    }
+
+    /// <summary>
+    /// Persist the window position on EVERY close path (Save, Apply→Close, Cancel, the
+    /// X, Alt+F4) so the dialog reopens where the user left it. Calling _config.Save()
+    /// here is safe even on a cancelled edit: _config's content fields are mutated only
+    /// by ApplySettings (the Save/Apply path), so on Cancel _config still holds the live,
+    /// already-persisted values and Save rewrites them unchanged plus the new X/Y.
+    /// Skipped when the INI is locked/corrupt (don't rewrite a damaged file as a side
+    /// effect of merely viewing settings) and when the position is unchanged (no needless
+    /// disk write when Settings is opened and closed without moving the window).
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        // A handler may veto the close (e.Cancel) — don't persist position, or mutate the
+        // in-memory baseline the unchanged-position guard below reads, for a window that's
+        // staying open. No SyncthingPause handler cancels today; this keeps the method
+        // honest if a validate-on-close is ever added.
+        if (e.Cancel) return;
+        if (_config.LoadResult != AppConfigLoadResult.None) return;
+        if (Location.X == (_config.WindowX ?? int.MinValue) &&
+            Location.Y == (_config.WindowY ?? int.MinValue))
+            return;
+        _config.WindowX = Location.X;
+        _config.WindowY = Location.Y;
+        // Fail loud: every other _config.Save() call site branches on the result. A silent
+        // drop here means the user's moved window quietly snaps back to center next open
+        // with no breadcrumb. Position is cosmetic, so a log line — not an OSD on a closing
+        // dialog whose OsdToolTip may itself be tearing down — is the right volume.
+        if (!_config.Save())
+            TrayLog.Warn("SettingsForm: failed to persist window position on close.");
     }
 
     protected override void Dispose(bool disposing)

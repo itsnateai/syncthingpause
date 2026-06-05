@@ -28,6 +28,17 @@ internal sealed class AppConfig
     public bool StopOnExit { get; set; }
 
     /// <summary>
+    /// Last on-screen position (top-left, screen coords) of the Settings dialog,
+    /// persisted on close so it reopens where the user left it. Null until the
+    /// dialog has been closed at least once. <see cref="SettingsForm"/> validates
+    /// the point against the connected screens on open and recovers to center when
+    /// the saved monitor is gone (unplugged / resolution shrank), so a stale value
+    /// here can never strand the dialog off-screen.
+    /// </summary>
+    public int? WindowX { get; set; }
+    public int? WindowY { get; set; }
+
+    /// <summary>
     /// Opt-in: every other user-facing surface (README, CHANGELOG, HelpForm,
     /// TrayLog docstring) advertises this as opt-in via
     /// `DiagnosticLogging=1`. Shipping a default of `true` contradicted the
@@ -244,6 +255,16 @@ internal sealed class AppConfig
         // matches the UI maximum so load and save agree on the same invariant.
         if (int.TryParse(GetString(settings, "StartupDelay", "0"), out int delay))
             StartupDelay = Math.Clamp(delay, 0, 3600);
+
+        // Window position — restored by SettingsForm on open (it validates the point
+        // is still on a connected screen). Both keys must parse, or we treat it as
+        // "no saved position" and leave WindowX/WindowY null so the dialog centers.
+        if (int.TryParse(GetString(settings, "WindowX", string.Empty), out int wx) &&
+            int.TryParse(GetString(settings, "WindowY", string.Empty), out int wy))
+        {
+            WindowX = wx;
+            WindowY = wy;
+        }
     }
 
     /// <summary>
@@ -283,6 +304,13 @@ internal sealed class AppConfig
         sb.AppendLine($"StopOnExit={BoolToStr(StopOnExit)}");
         sb.AppendLine($"DiagnosticLogging={BoolToStr(DiagnosticLogging)}");
         sb.AppendLine($"ThemeMode={ThemeMode}");
+        // Window position is written only once captured (dialog closed at least once);
+        // omitting the keys keeps a pristine first-run INI free of cosmetic state.
+        if (WindowX is int winX && WindowY is int winY)
+        {
+            sb.AppendLine($"WindowX={winX}");
+            sb.AppendLine($"WindowY={winY}");
+        }
 
         try
         {
