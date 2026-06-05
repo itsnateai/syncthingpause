@@ -1074,6 +1074,7 @@ internal sealed class SettingsForm : Form
         }
         try
         {
+            // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- exePath is Environment.ProcessPath (own exe, validated non-empty above); hardcoded --after-theme-restart arg, no user input
             using var p = Process.Start(new ProcessStartInfo(exePath)
             {
                 Arguments = "--after-theme-restart",

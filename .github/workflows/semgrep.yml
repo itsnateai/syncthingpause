@@ -37,22 +37,44 @@ jobs:
       # severity value, is not a number" otherwise. Map labels to the
       # documented buckets:
       # https://docs.github.com/en/code-security/reference/code-scanning/sarif-support-for-code-scanning
-      - name: Normalize SARIF security-severity (semgrep label → numeric)
+      - name: Normalize + filter SARIF before upload
         if: always() && hashFiles('semgrep.sarif') != ''
         run: |
           python3 - <<'PY'
           import json
           mapping = {"critical": "9.5", "high": "7.5", "medium": "5.5", "low": "2.0"}
+          # Rules dropped from the Security-tab upload.
+          # SCS0001 ("OS Command Injection") is a broad taint rule: it flags EVERY
+          # Process.Start whose argument isn't a compile-time constant in the same
+          # expression, with no flow-sensitivity for upstream validation guards or
+          # Environment.ProcessPath. Every Process.Start site in this app is validated
+          # (Uri.TryCreate http/https for URLs; OpenFolder rejects UNC/URI-scheme/
+          # non-qualified paths + requires Directory.Exists; the Syncthing launch uses
+          # UseShellExecute=false + hardcoded args; self-relaunch uses the own-exe path).
+          # The 8 historical alerts were dismissed as false-positive on 2026-06-05.
+          # Inline `// nosemgrep` comments do NOT reach this uploaded SARIF in
+          # `semgrep ci` + SEMGREP_APP_TOKEN mode, so suppression is enforced here.
+          # REVISIT if this app ever executes a command built from UNTRUSTED input
+          # (network payloads, peer data beyond the already-validated folder path) —
+          # at that point this rule regains real value and should be re-enabled.
+          DROP_RULES = ("gitlab.security_code_scan.SCS0001-1",)
           with open("semgrep.sarif") as f:
               sarif = json.load(f)
+          dropped = 0
           for run in sarif.get("runs", []):
               for rule in run.get("tool", {}).get("driver", {}).get("rules", []):
                   props = rule.get("properties", {})
                   v = props.get("security-severity")
                   if isinstance(v, str):
                       props["security-severity"] = mapping.get(v.lower(), "0.0")
+              results = run.get("results")
+              if isinstance(results, list):
+                  before = len(results)
+                  run["results"] = [r for r in results if r.get("ruleId") not in DROP_RULES]
+                  dropped += before - len(run["results"])
           with open("semgrep.sarif", "w") as f:
               json.dump(sarif, f)
+          print(f"SARIF filter: dropped {dropped} suppressed result(s); rules={DROP_RULES}")
           PY
       # `if: always()` so SARIF still uploads when semgrep ci exits non-zero
       # on policy-blocking findings — that's exactly when we want the alerts
