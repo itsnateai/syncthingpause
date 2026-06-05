@@ -594,6 +594,26 @@ internal static class Bars
         return g;
     }
 
+    /// <summary>N controls each CENTRED in an equal-width column — even spacing with
+    /// padding on BOTH outer sides. Differs from <see cref="Spread"/>, which hugs the
+    /// first item hard against the left edge and the last against the right (no outer
+    /// padding). This is the Save / Apply / Cancel footer row: the buttons read as evenly
+    /// distributed across the full width, with equal gaps before, between, and after, at
+    /// any DPI (each button auto-sizes; the equal columns + centre anchor do the spacing).</summary>
+    public static TableLayoutPanel Distribute(params Control[] items)
+    {
+        int n = items.Length;
+        var g = NewBar(n);
+        for (int i = 0; i < n; i++) g.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / n));
+        for (int i = 0; i < n; i++)
+        {
+            items[i].Anchor = AnchorStyles.None;   // centred in its column → equal padding all around
+            items[i].Margin = Padding.Empty;
+            g.Controls.Add(items[i], i, 0);
+        }
+        return g;
+    }
+
     private static TableLayoutPanel NewBar(int cols) => new()
     {
         ColumnCount = cols,

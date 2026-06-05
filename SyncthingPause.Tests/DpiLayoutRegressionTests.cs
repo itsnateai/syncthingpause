@@ -93,12 +93,93 @@ public class DpiLayoutRegressionTests
         });
     }
 
+    [TestMethod]
+    public void SettingsForm_ThemeRadios_ShareTheSameVerticalBaseline()
+    {
+        OnSta(() =>
+        {
+            Theme.Initialize(true);
+            var cfg = StubConfig();
+            var api = new SyncthingApi(cfg);
+            using var osd = new OsdToolTip();
+            using var form = new SettingsForm(cfg, api, osd, () => { }, () => { });
+
+            var dark = FindControl<RadioButton>(form, r => r.AccessibleName == "Dark theme");
+            var light = FindControl<RadioButton>(form, r => r.AccessibleName == "Light theme");
+            Assert.IsNotNull(dark, "Settings must expose a Dark theme radio.");
+            Assert.IsNotNull(light, "Settings must expose a Light theme radio.");
+            // Both radios flow LeftToRight in one FlowLayoutPanel, which positions each control at
+            // rowTop + Margin.Top — so unequal top margins stagger them vertically. The v3.2.15 bug:
+            // Light kept the RadioButton default Margin (Padding(3), top 3) while Dark used top 0,
+            // dropping Light 3px below Dark.
+            Assert.AreEqual(dark!.Margin.Top, light!.Margin.Top,
+                "Theme radios must share Margin.Top, or they render on different baselines.");
+            Assert.AreEqual(dark.Margin.Bottom, light.Margin.Bottom,
+                "Theme radios must share Margin.Bottom for a symmetric row.");
+        });
+    }
+
+    [TestMethod]
+    public void SettingsForm_PrimaryButtons_AreEvenlyDistributed()
+    {
+        OnSta(() =>
+        {
+            Theme.Initialize(true);
+            var cfg = StubConfig();
+            var api = new SyncthingApi(cfg);
+            using var osd = new OsdToolTip();
+            using var form = new SettingsForm(cfg, api, osd, () => { }, () => { });
+
+            var save = FindButtonByText(form, "Save");
+            var apply = FindButtonByText(form, "Apply");
+            var cancel = FindButtonByText(form, "Cancel");
+            Assert.IsNotNull(save, "Settings must expose a Save button.");
+            Assert.IsNotNull(apply, "Settings must expose an Apply button.");
+            Assert.IsNotNull(cancel, "Settings must expose a Cancel button.");
+
+            // Even distribution = all three buttons in ONE TableLayoutPanel, each centred
+            // (Anchor.None) in its own equal-width Percent column. The pre-fix Bars.Split put them
+            // in a 2-column right-hugged group; this guards against regressing to that.
+            var tlp = save!.Parent as TableLayoutPanel;
+            Assert.IsNotNull(tlp, "Save must sit in a TableLayoutPanel (Bars.Distribute).");
+            Assert.AreSame(tlp, apply!.Parent, "Apply must share Save's distribution panel.");
+            Assert.AreSame(tlp, cancel!.Parent, "Cancel must share Save's distribution panel.");
+
+            foreach (Control b in new[] { save, apply, cancel })
+                Assert.AreEqual(AnchorStyles.None, b.Anchor,
+                    "Each primary button must be centred (Anchor.None) in its column for even spacing.");
+
+            float? firstPct = null;
+            int pctCols = 0;
+            foreach (ColumnStyle cs in tlp!.ColumnStyles)
+            {
+                if (cs.SizeType != SizeType.Percent) continue;
+                pctCols++;
+                firstPct ??= cs.Width;
+                Assert.AreEqual(firstPct.Value, cs.Width, 0.01f,
+                    "All Percent columns must be equal width for an even split.");
+            }
+            Assert.AreEqual(3, pctCols, "Three buttons → three equal-width Percent columns.");
+        });
+    }
+
     private static Button? FindButtonByText(Control root, string text)
     {
         foreach (Control c in root.Controls)
         {
             if (c is Button b && b.Text == text) return b;
             var found = FindButtonByText(c, text);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static T? FindControl<T>(Control root, Func<T, bool> predicate) where T : Control
+    {
+        foreach (Control c in root.Controls)
+        {
+            if (c is T t && predicate(t)) return t;
+            var found = FindControl(c, predicate);
             if (found != null) return found;
         }
         return null;

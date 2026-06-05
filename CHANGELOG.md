@@ -4,6 +4,24 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.15 — 2026-06-05
+
+### Settings dialog polish (four layout fixes)
+
+Four small Settings-window layout issues, reported at 100% display scaling and fixed without disturbing the rest of the form. All four were re-rendered and confirmed on a real 100% **and** real 150% display (Tiny11 lab, `DeviceDpi` 96 and 144) — a 100%-only dev machine can't reveal a 150% clip, so both scales are verified:
+
+- **Middle-click combo no longer bleeds into the card border.** `ThemedComboBox` bumps its `ItemHeight` in `OnHandleCreated`, which runs *after* the first layout pass and grows the closed combo without re-measuring the AutoSize cell it sits in — so the taller combo overflowed its stale cell and crossed the card's bottom border on the last row. One forced re-layout once all handles exist reserves each combo's true height.
+- **"Windows startup delay" box is sized for the value, not the max.** Narrowed from 80px to 58px — it fits the realistic 1–2 digit delay (default 20s) instead of looking oversized, while still clearing the 3600 max + spinner at any DPI, so the `[0, 3600]` range the load clamp depends on is unchanged.
+- **Dark / Light theme radios sit on the same baseline.** The Light radio was inheriting the default `Padding(3)` margin (top 3) while Dark used top 0, leaving it 3px lower; both now use matching vertical margins.
+- **Save / Apply / Cancel are evenly distributed.** They were right-hugged (an empty-left `Bars.Split`); a new `Bars.Distribute` centres each button in an equal third, so the gaps before / between / after are equal with padding on both outer sides.
+
+### What's underneath
+
+- **`SyncthingPause/SettingsForm.cs`** — `PerformLayout()` on Load (combo re-measure); startup-delay field 80→58px; Light-radio margin; footer `Bars.Split`→`Bars.Distribute`.
+- **`SyncthingPause/CardLayout.cs`** — added `Bars.Distribute` (even, padded distribution; `Bars.Spread` left intact for HelpForm).
+- **`SyncthingPause.Tests/DpiLayoutRegressionTests.cs`** — guards for the radio-baseline and button-distribution invariants.
+- **`SyncthingPause.csproj`** — 3.2.14 → 3.2.15.
+
 ## v3.2.14 — 2026-06-04
 
 ### Internal: post-ship verification hygiene (no user-facing change)

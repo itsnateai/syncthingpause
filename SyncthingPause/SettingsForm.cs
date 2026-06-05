@@ -105,6 +105,14 @@ internal sealed class SettingsForm : Form
         // Load (handle exists + AutoScale has run → ContentSize is device-DPI accurate).
         Load += (_, _) =>
         {
+            // Re-run layout now that every handle exists and each ThemedComboBox has bumped its
+            // ItemHeight (done in OnHandleCreated — AFTER the initial layout pass). That bump grows
+            // the closed combo via CB_SETITEMHEIGHT but does NOT re-measure the AutoSize cell it sits
+            // in, so the taller combo overflows its stale cell and bleeds past the card's bottom border
+            // on the last row (the Middle-click combo). One forced re-layout reserves each combo's true
+            // height before we measure ContentSize below.
+            PerformLayout();
+
             // Cards scroll inside the AutoScroll host; the button bar is a docked footer
             // OUTSIDE that host (so it never falls below the scroll fold at 150%). Size the
             // window to: cards content (clamped to the work area) PLUS the footer height.
@@ -175,9 +183,11 @@ internal sealed class SettingsForm : Form
 
         // Windows startup delay — gap between tray launch and Syncthing launch (lets the
         // network stack settle on auto-startup). Spin in 5s steps or type any value [0, 3600].
-        // The fixed 80px holds the 4-digit Maximum ("3600") + spinner at any DPI — AutoScaleMode
-        // scales the width with the font (~120px at 150%, content ~67px), so no content-fit pass is needed.
-        _nudDelay = Fields.Numeric(0, 3600, _config.StartupDelay, width: 80, increment: 5);
+        // 58px is sized for the realistic value (a 1–2 digit delay, default 20) rather than the
+        // bulky 4-digit-max width — yet still clears "3600" + spinner at 100% (~51px content) and
+        // at 150% (AutoScaleMode scales the width with the font), so the [0, 3600] max that
+        // AppConfig's load clamp depends on stays uncapped. Narrower would risk clipping the max.
+        _nudDelay = Fields.Numeric(0, 3600, _config.StartupDelay, width: 58, increment: 5);
         _nudDelay.AccessibleName = "Windows startup delay in seconds";
         card.FlowRow("Windows startup delay:", _nudDelay, Fields.Label("seconds"));
     }
@@ -330,6 +340,11 @@ internal sealed class SettingsForm : Form
             ForeColor = Theme.Fg,
             AutoSize = true,
             Checked = !currentlyDark,
+            // Match Dark's vertical margins exactly. In a LeftToRight FlowLayoutPanel each
+            // control sits at rowTop + Margin.Top; Dark uses Padding(0,0,12,0) (top 0) while
+            // the RadioButton default Margin is Padding(3) (top 3) — leaving Light 3px lower
+            // than Dark. Zero top/bottom here puts the two glyphs on the same baseline.
+            Margin = Padding.Empty,
             AccessibleName = "Light theme",
         };
         radios.Controls.Add(_rbThemeDark);
@@ -682,7 +697,10 @@ internal sealed class SettingsForm : Form
         footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         footer.Controls.Add(top, 0, 0);
-        footer.Controls.Add(Bars.Split(Array.Empty<Control>(), new Control[] { btnSave, btnApply, btnCancel }), 0, 1);
+        // Save / Apply / Cancel spread evenly across the row — each centred in an equal third,
+        // so the gaps before / between / after are equal (Bars.Split hugged all three to the
+        // right edge, leaving the left two-thirds empty).
+        footer.Controls.Add(Bars.Distribute(btnSave, btnApply, btnCancel), 0, 1);
         stack.SetFooter(footer);
 
         AcceptButton = btnSave;
