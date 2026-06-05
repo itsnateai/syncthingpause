@@ -116,6 +116,11 @@ public class DpiLayoutRegressionTests
                 "Theme radios must share Margin.Top, or they render on different baselines.");
             Assert.AreEqual(dark.Margin.Bottom, light.Margin.Bottom,
                 "Theme radios must share Margin.Bottom for a symmetric row.");
+            // Equal margins alone don't guarantee a shared baseline: the FlowLayoutPanel row height is
+            // the MAX child height, so a taller font on one radio (same Margin.Top) shifts its glyph
+            // centre relative to the shorter one. Pin a shared font to close that second vector.
+            Assert.AreEqual(dark.Font, light.Font,
+                "Theme radios must share a Font, or differing row heights break the baseline.");
         });
     }
 
@@ -160,6 +165,41 @@ public class DpiLayoutRegressionTests
                     "All Percent columns must be equal width for an even split.");
             }
             Assert.AreEqual(3, pctCols, "Three buttons → three equal-width Percent columns.");
+        });
+    }
+
+    [TestMethod]
+    public void BarsDistribute_GivesEqualCentredColumnsForAnyCount()
+    {
+        OnSta(() =>
+        {
+            // Bars.Distribute is a reusable primitive (sibling of Bars.Spread, which HelpForm uses), so
+            // lock its contract DIRECTLY instead of only through the n=3 SettingsForm call site: N items →
+            // N equal-width Percent columns, each item centred (Anchor.None) in its own sequential column.
+            foreach (int n in new[] { 2, 3, 4 })
+            {
+                var items = new Control[n];
+                for (int i = 0; i < n; i++) items[i] = new Button { Text = $"b{i}" };
+                using var bar = Bars.Distribute(items);
+
+                Assert.AreEqual(n, bar.ColumnCount, $"Distribute({n}) must declare {n} columns.");
+
+                int pct = 0;
+                foreach (ColumnStyle cs in bar.ColumnStyles)
+                {
+                    if (cs.SizeType != SizeType.Percent) continue;
+                    pct++;
+                    Assert.AreEqual(100f / n, cs.Width, 0.01f, $"Distribute({n}) columns must each be 100/{n}%.");
+                }
+                Assert.AreEqual(n, pct, $"Distribute({n}) must have {n} Percent columns (not AutoSize/Absolute).");
+
+                for (int i = 0; i < n; i++)
+                {
+                    Assert.AreEqual(AnchorStyles.None, items[i].Anchor, $"Distribute item {i} must be centred (Anchor.None).");
+                    Assert.AreSame(bar, items[i].Parent, $"Distribute item {i} must be parented to the bar.");
+                    Assert.AreEqual(i, bar.GetColumn(items[i]), $"Distribute item {i} must occupy column {i}.");
+                }
+            }
         });
     }
 
