@@ -73,12 +73,32 @@ internal sealed class ThemedComboBox : ComboBox
         BackColor = Theme.EditBg;
     }
 
+    /// <summary>
+    /// Extra bottom space a layout must reserve below this combo, ON TOP OF its
+    /// font-derived preferred height, so the grown owner-draw box doesn't bleed past
+    /// its cell. See <see cref="OnHandleCreated"/> for why the box grows and why the
+    /// reservation has to live in the cell margin rather than the combo's own size.
+    /// 0 until the handle exists (and <see cref="ItemHeight"/> is bumped); read it
+    /// AFTER the handle is created (e.g. on Form.Load).
+    /// </summary>
+    public int OverflowBelow { get; private set; }
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         // AutoScaleMode.Dpi does NOT walk ItemHeight (an int, not a Size). Derive
         // it from the font at the device DPI so rows fit glyphs at every scale.
         ItemHeight = (int)Math.Ceiling(Font.GetHeight(DeviceDpi)) + LogicalToDeviceUnits(4);
+
+        // CB_SETITEMHEIGHT (above) grows the closed owner-draw box, but ComboBox's
+        // preferred height is font-derived and IGNORES ItemHeight — and ComboBox snaps
+        // its own height, ignoring MinimumSize / GetPreferredSize overrides, so the cell a
+        // TableLayoutPanel reserves stays too short and the box bleeds past the card border
+        // on the last row (measured: realized Height 26 vs PreferredHeight 23 at 96 DPI).
+        // The combo can't be made to report the bigger size, so instead we EXPOSE how much
+        // it overflows; the host reserves that much extra as bottom Margin on the row (the
+        // one lever the combo can't override — margin is added to the cell unconditionally).
+        OverflowBelow = Math.Max(0, Height - base.GetPreferredSize(Size.Empty).Height);
     }
 
     protected override void OnDrawItem(DrawItemEventArgs e)

@@ -4,6 +4,22 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.16 — 2026-06-04
+
+### Settings dialog: the combo bleed (for real this time) + wider action buttons
+
+Two Settings-window layout fixes. Both were re-rendered and confirmed on a real 100% **and** real 150% display (Tiny11 lab, `DeviceDpi` 96 and 144) — a 100%-only dev machine can't reveal a 150% issue, so both scales are verified.
+
+- **The Middle-click combo really stops bleeding into the card border now.** v3.2.15 claimed this fix but it was *inert*: `ThemedComboBox` grows its closed height via `CB_SETITEMHEIGHT` in `OnHandleCreated`, but `ComboBox`'s preferred height is font-derived and **ignores `ItemHeight`**, *and* the control snaps its own height (so `MinimumSize` / `GetPreferredSize` overrides don't take). So the AutoSize cell kept reserving the too-short font height — measured **realized Height 26 vs PreferredHeight 23 at 96 DPI** — and the v3.2.15 `PerformLayout()`-on-Load re-ran *positioning* against that same cached (short) measurement without ever moving the border. The real fix: the combo now exposes how far it overflows (`OverflowBelow`), and the form reserves that — plus a few px of breathing room — as extra **bottom margin** on each combo row (the one lever the combo can't override; the `Margin` setter also busts the cell's stale preferred-size cache). The Middle-click combo's gap to the card border went from **−1px to +6px**.
+- **Save / Apply / Cancel are wider.** v3.2.15 distributed them evenly but they still collapsed to their short labels, looking puny under the GitHub / Update / Syncthing / Help / Check Config row. They now get a DPI-scaled minimum width (`LogicalToDeviceUnits(92)`) so they read as substantial primary actions and balance that row.
+
+### What's underneath
+
+- **`SyncthingPause/CardLayout.cs`** — `ThemedComboBox` now exposes `OverflowBelow` (realized height − font-derived preferred height), computed once the handle exists.
+- **`SyncthingPause/SettingsForm.cs`** — Load reserves each click-action combo's `OverflowBelow` (+ breathing room) as bottom margin, and sets `MinimumSize.Width = LogicalToDeviceUnits(92)` on Save / Apply / Cancel.
+- **`SyncthingPause.Tests/DpiLayoutRegressionTests.cs`** — two new guards (combo reserves bottom overflow; action buttons get an equal generous min-width), realized offscreen so the Load-time geometry is actually exercised. The v3.2.15 combo regression shipped precisely because no test guarded the bleed.
+- **`SyncthingPause.csproj`** — 3.2.15 → 3.2.16.
+
 ## v3.2.15 — 2026-06-04
 
 ### Settings dialog polish (four layout fixes)

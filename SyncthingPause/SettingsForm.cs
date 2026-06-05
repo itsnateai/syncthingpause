@@ -44,6 +44,13 @@ internal sealed class SettingsForm : Form
     private RadioButton _rbThemeDark = null!;
     private RadioButton _rbThemeLight = null!;
 
+    // Footer action buttons — sized in Load (handle exists → LogicalToDeviceUnits is DPI-accurate)
+    // to a generous minimum width so they read as the primary actions and balance the wider
+    // links/actions row above them, rather than shrinking to their short labels.
+    private Button _btnSave = null!;
+    private Button _btnApply = null!;
+    private Button _btnCancel = null!;
+
     // Reveal-glyph button (MDL2); every other control draws from CardLayout's CardFonts.
     private readonly Font _iconFont;
 
@@ -105,12 +112,34 @@ internal sealed class SettingsForm : Form
         // Load (handle exists + AutoScale has run → ContentSize is device-DPI accurate).
         Load += (_, _) =>
         {
-            // Re-run layout now that every handle exists and each ThemedComboBox has bumped its
-            // ItemHeight (done in OnHandleCreated — AFTER the initial layout pass). That bump grows
-            // the closed combo via CB_SETITEMHEIGHT but does NOT re-measure the AutoSize cell it sits
-            // in, so the taller combo overflows its stale cell and bleeds past the card's bottom border
-            // on the last row (the Middle-click combo). One forced re-layout reserves each combo's true
-            // height before we measure ContentSize below.
+            // Each ThemedComboBox bumped its ItemHeight in OnHandleCreated (AFTER the initial
+            // layout pass), growing the closed owner-draw box via CB_SETITEMHEIGHT. ComboBox's
+            // preferred height ignores ItemHeight AND it snaps its own height, so the AutoSize
+            // cell it sits in stays too short and the box bleeds past the card's bottom border on
+            // the last row (Middle-click). The combo exposes how far it overflows; reserve that —
+            // plus a few px of breathing room — as extra BOTTOM MARGIN on each combo row (the one
+            // lever the combo can't override; the Margin setter also busts the cell's stale
+            // preferred-size cache, which a plain PerformLayout did NOT — that was the old, inert fix).
+            foreach (var cb in new[] { _cboDblClick, _cboMiddleClick })
+            {
+                if (cb is ThemedComboBox t)
+                {
+                    var m = cb.Margin;
+                    cb.Margin = new Padding(m.Left, m.Top, m.Right,
+                        m.Bottom + t.OverflowBelow + LogicalToDeviceUnits(4));
+                }
+            }
+
+            // Footer actions: give Save / Apply / Cancel a generous minimum width so they read as
+            // substantial primary buttons and visually balance the (wider) links row above, instead
+            // of collapsing to their short labels. LogicalToDeviceUnits keeps it crisp at any DPI.
+            int minBtnW = LogicalToDeviceUnits(92);
+            _btnSave.MinimumSize = new Size(minBtnW, 0);
+            _btnApply.MinimumSize = new Size(minBtnW, 0);
+            _btnCancel.MinimumSize = new Size(minBtnW, 0);
+
+            // Re-run layout now that the reservations + button widths are set, so ContentSize /
+            // footer PreferredSize below measure the finalized geometry.
             PerformLayout();
 
             // Cards scroll inside the AutoScroll host; the button bar is a docked footer
@@ -672,11 +701,11 @@ internal sealed class SettingsForm : Form
             top.Controls.Add(b);
         }
 
-        var btnSave = Fields.Primary("Save");
+        var btnSave = _btnSave = Fields.Primary("Save");
         btnSave.Click += OnSave;
-        var btnApply = Fields.Button("Apply");
+        var btnApply = _btnApply = Fields.Button("Apply");
         btnApply.Click += OnApply;
-        var btnCancel = Fields.Button("Cancel");
+        var btnCancel = _btnCancel = Fields.Button("Cancel");
         btnCancel.DialogResult = DialogResult.Cancel;
         btnCancel.Click += (_, _) => Close();
 

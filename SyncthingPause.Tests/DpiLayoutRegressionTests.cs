@@ -203,6 +203,77 @@ public class DpiLayoutRegressionTests
         });
     }
 
+    // Realize a SettingsForm offscreen so its Load handler runs (the combo-overflow reservation and
+    // the action-button min-width are applied there, not at construction — the construction-only tests
+    // above can't see them). No ApiKey → the discovery probe/timer stays dormant during the show.
+    private static void WithShownSettings(Action<SettingsForm> assert)
+    {
+        OnSta(() =>
+        {
+            Theme.Initialize(true);
+            var cfg = StubConfig();
+            var api = new SyncthingApi(cfg);
+            using var osd = new OsdToolTip();
+            using var form = new SettingsForm(cfg, api, osd, () => { }, () => { })
+            {
+                StartPosition = FormStartPosition.Manual,
+                Location = new System.Drawing.Point(-32000, -32000),
+                ShowInTaskbar = false,
+            };
+            form.Show();
+            try
+            {
+                Application.DoEvents();   // pump Load + the layout pass it triggers
+                assert(form);
+            }
+            finally { form.Close(); }
+        });
+    }
+
+    [TestMethod]
+    public void SettingsForm_ClickActionCombos_ReserveBottomOverflow_SoTheyDontBleedPastTheCard()
+    {
+        // v3.2.15 "fixed" this with a PerformLayout()-on-Load that was inert: a ThemedComboBox grows its
+        // closed height via CB_SETITEMHEIGHT, but ComboBox's preferred height ignores ItemHeight and the
+        // control snaps its own height, so re-running layout still reserved the too-short cell and the
+        // last-row (Middle-click) combo bled under the card border. The real fix reserves the measured
+        // OverflowBelow as extra BOTTOM MARGIN on each combo row. RowFit's baseline bottom margin is 2;
+        // any reservation makes it strictly larger. This guards against silently reverting to the inert fix.
+        WithShownSettings(form =>
+        {
+            foreach (var name in new[] { "Double-click action", "Middle-click action" })
+            {
+                var combo = FindControl<ComboBox>(form, c => c.AccessibleName == name);
+                Assert.IsNotNull(combo, $"Settings must expose the {name} combo.");
+                Assert.IsTrue(combo!.Margin.Bottom > 2,
+                    $"{name} must reserve extra bottom margin beyond RowFit's baseline (2) so the grown "
+                    + "owner-draw combo clears the card's bottom border. Got " + combo.Margin.Bottom + ".");
+            }
+        });
+    }
+
+    [TestMethod]
+    public void SettingsForm_PrimaryButtons_HaveGenerousEqualMinimumWidth()
+    {
+        // Save / Apply / Cancel are given a DPI-scaled MinimumSize.Width in Load so they read as
+        // substantial primary actions (balancing the wider links row above) instead of collapsing to
+        // their short labels. Guard that the floor is applied and equal across the three.
+        WithShownSettings(form =>
+        {
+            var save = FindButtonByText(form, "Save");
+            var apply = FindButtonByText(form, "Apply");
+            var cancel = FindButtonByText(form, "Cancel");
+            Assert.IsNotNull(save, "Settings must expose a Save button.");
+            Assert.IsNotNull(apply, "Settings must expose an Apply button.");
+            Assert.IsNotNull(cancel, "Settings must expose a Cancel button.");
+
+            int expected = save!.LogicalToDeviceUnits(92);
+            foreach (var (b, name) in new[] { (save, "Save"), (apply!, "Apply"), (cancel!, "Cancel") })
+                Assert.AreEqual(expected, b.MinimumSize.Width,
+                    $"{name} must get the generous DPI-scaled minimum width so the action row stays balanced.");
+        });
+    }
+
     private static Button? FindButtonByText(Control root, string text)
     {
         foreach (Control c in root.Controls)
