@@ -243,11 +243,28 @@ public class DpiLayoutRegressionTests
         {
             foreach (var name in new[] { "Double-click action", "Middle-click action" })
             {
-                var combo = FindControl<ComboBox>(form, c => c.AccessibleName == name);
-                Assert.IsNotNull(combo, $"Settings must expose the {name} combo.");
-                Assert.IsTrue(combo!.Margin.Bottom > 2,
-                    $"{name} must reserve extra bottom margin beyond RowFit's baseline (2) so the grown "
-                    + "owner-draw combo clears the card's bottom border. Got " + combo.Margin.Bottom + ".");
+                var combo = FindControl<ThemedComboBox>(form, c => c.AccessibleName == name);
+                Assert.IsNotNull(combo, $"Settings must expose the {name} combo as a ThemedComboBox.");
+
+                // The owner-draw ItemHeight bump must actually grow the box past its font-derived
+                // preferred height — otherwise there's nothing to reserve and the assertion below
+                // would be vacuous. (Measured ~3px at 96 DPI; scales with DPI.)
+                Assert.IsTrue(combo!.OverflowBelow > 0,
+                    $"{name}: ItemHeight bump must grow the box past its preferred height "
+                    + $"(OverflowBelow={combo.OverflowBelow}); without it the fix is moot.");
+
+                // NON-VACUOUS guard: the bottom margin must exceed breathing-room-ALONE
+                // (RowFit's baseline + the breathing px). That's only possible if the OverflowBelow
+                // term was actually added; dropping it (the v3.2.15 inert-fix regression) makes
+                // Margin.Bottom == breathingOnly, failing this strict >. Both inputs are derived,
+                // not hardcoded: the baseline from Margin.Top (Load mutates only .Bottom, so .Top
+                // still holds RowFit's value) and the breathing px from the same named constant the
+                // Load handler uses — so this can't go stale if either is tuned.
+                int breathingOnly = combo.Margin.Top + combo.LogicalToDeviceUnits(SettingsForm.ClickComboBottomBreathingPx);
+                Assert.IsTrue(combo.Margin.Bottom > breathingOnly,
+                    $"{name}: bottom margin {combo.Margin.Bottom} must exceed breathing-room-only "
+                    + $"{breathingOnly} — it must reserve OverflowBelow ({combo.OverflowBelow}) on top, "
+                    + "or the last-row combo bleeds under the card border.");
             }
         });
     }

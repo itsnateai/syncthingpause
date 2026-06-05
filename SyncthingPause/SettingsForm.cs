@@ -14,9 +14,12 @@ internal sealed class SettingsForm : Form
     private readonly OsdToolTip _osd;
     private bool _disposed;
 
-    // Controls we need to read on Save (assigned in Build* methods)
-    private ComboBox _cboDblClick = null!;
-    private ComboBox _cboMiddleClick = null!;
+    // Controls we need to read on Save (assigned in Build* methods). The two click-action
+    // combos are typed ThemedComboBox (not ComboBox) so Load can read OverflowBelow with no
+    // cast — the overflow reservation can't be silently skipped, and if either is ever built
+    // as a plain ComboBox this stops compiling (loud by construction).
+    private ThemedComboBox _cboDblClick = null!;
+    private ThemedComboBox _cboMiddleClick = null!;
     private CheckBox _cbRunOnStartup = null!;
     private CheckBox _cbStartBrowser = null!;
     private CheckBox _cbNetPause = null!;
@@ -63,6 +66,12 @@ internal sealed class SettingsForm : Form
     // under-measures at high DPI (a Fill field's PreferredSize is its 96-DPI literal
     // width). 100% is unaffected — it keeps the natural measured width.
     private const int DesignClientWidth = 450;
+
+    // 96-DPI breathing room reserved BELOW each click-action combo's measured overflow, so the
+    // grown owner-draw box clears the card's bottom border with a visible gap. Named (not a bare
+    // literal) so the DpiLayoutRegressionTests guard derives its threshold from the same source
+    // and can't go stale if this is tuned. LogicalToDeviceUnits scales it per DPI at the call site.
+    internal const int ClickComboBottomBreathingPx = 4;
 
     public SettingsForm(AppConfig config, SyncthingApi api, OsdToolTip osd, Action onApplied, Action onSaved)
     {
@@ -120,14 +129,11 @@ internal sealed class SettingsForm : Form
             // plus a few px of breathing room — as extra BOTTOM MARGIN on each combo row (the one
             // lever the combo can't override; the Margin setter also busts the cell's stale
             // preferred-size cache, which a plain PerformLayout did NOT — that was the old, inert fix).
-            foreach (var cb in new[] { _cboDblClick, _cboMiddleClick })
+            foreach (var combo in new[] { _cboDblClick, _cboMiddleClick })
             {
-                if (cb is ThemedComboBox t)
-                {
-                    var m = cb.Margin;
-                    cb.Margin = new Padding(m.Left, m.Top, m.Right,
-                        m.Bottom + t.OverflowBelow + LogicalToDeviceUnits(4));
-                }
+                var m = combo.Margin;
+                combo.Margin = new Padding(m.Left, m.Top, m.Right,
+                    m.Bottom + combo.OverflowBelow + LogicalToDeviceUnits(ClickComboBottomBreathingPx));
             }
 
             // Footer actions: give Save / Apply / Cancel a generous minimum width so they read as
