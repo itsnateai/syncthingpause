@@ -2,13 +2,11 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="SyncthingPause" />
 
-  <!-- Per-Monitor-V2 DPI: the OSD tooltip + Settings dialog re-scale correctly
-       when the user drags the window between monitors of different scale factors
-       (common: 100% laptop + 150% external 4K). Without this, OSD text renders
-       at first-seen DPI for the process lifetime. -->
+  <!-- DPI awareness is declared in SyncthingPause.csproj (<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>)
+       + Program.cs Application.SetHighDpiMode, NOT here. dpiAwareness in the manifest triggers compiler
+       warning WFAC010 for .NET WinForms (it conflicts with / overrides the csproj setting). -->
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
       <!-- Opt into Windows 10 1607+ long-path support for SyncExe paths that exceed MAX_PATH. -->
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
