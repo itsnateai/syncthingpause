@@ -1327,6 +1327,13 @@ internal sealed class SettingsForm : Form
     /// Skipped when the INI is locked/corrupt (don't rewrite a damaged file as a side
     /// effect of merely viewing settings) and when the position is unchanged (no needless
     /// disk write when Settings is opened and closed without moving the window).
+    ///
+    /// On the theme-restart Save path this ALSO fires (Application.Exit tears the form down,
+    /// raising FormClosing): capturing the position there is deliberate — the user saved at
+    /// that on-screen spot and the spawned replacement should reopen there. The mutex
+    /// hand-off in Program.Main serializes this write before the replacement reads the INI
+    /// (the dying instance holds the single-instance mutex until Application.Run returns,
+    /// which is after this write), so there's no read-before-write race.
     /// </summary>
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
