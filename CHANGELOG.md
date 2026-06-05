@@ -4,6 +4,35 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.12 — 2026-06-04
+
+### Fix: DPI layout-container rebuild — every window scales proportionally at 150%
+
+The dialogs were built on absolute pixel coordinates plus an `AutoScaleMode.Dpi` retrofit. On a 100% display (and most dev machines) they looked perfect — but at 150% the retrofit scaled fonts, not bounds, so controls clipped. Verified by rendering every form at a **real** 150% device DPI (`DeviceDpi=144`) on a Hyper-V test VM, which surfaced bugs no 100% render could:
+
+- **SettingsForm — primary buttons scrolled off-frame at 150%.** The Save / Apply / Cancel + links rows lived *inside* the scrollable card stack, so when the cards overflowed the work-area clamp at 150% the buttons fell below the scroll fold and became unreachable. They're now pinned in a docked footer *outside* the scroll viewport.
+- **SettingsForm — the window under-scaled to ~1.2× instead of 1.5×.** Its width was measured from AutoSize content, which under-reports at high DPI (a fill field's preferred size is its 96-DPI literal width). The form now sizes its width to a design baseline × the DPI factor, so fill fields stretch to a true 1.5× — long paths are fully visible at 150%.
+- **SyncthingUpdateDialog — wrong post-action button position + marquee at 150%.** The upgrade-complete / timeout / error states re-centered the button with a raw pixel literal (set after auto-scaling → wrong at 150%), and the marquee used un-scaled dimensions. Both now use the same physical-px + `LogicalToDeviceUnits` math UpdateDialog already shipped.
+- **Both update dialogs — the "Upgrade Now" button clipped "Now" at 150%.** The fixed-width button's bounds lagged the scaled font. SyncthingUpdateDialog's action button now AutoSizes to its text; UpdateDialog's button width was widened (100 → 130).
+- **OsdToolTip — text wrapped too early + under-padded at 150%.** Its runtime size computation (wrap width, padding, screen-edge margin) ran after auto-scaling and wasn't DPI-scaled. All four now route through `LogicalToDeviceUnits`.
+
+HelpForm was already correct (its explicit `ClientSize` scales cleanly). 100% rendering is byte-identical to before — every fix is gated to high-DPI paths.
+
+### What's underneath
+
+- **`SyncthingPause/CardLayout.cs`** — new `CardStack.SetFooter()`: re-parents the scroll host + a footer into a 2-row root `TableLayoutPanel` (host fills row 0, footer hugs row 1) so docked controls never enter the scroll viewport. New `Footer` property.
+- **`SyncthingPause/SettingsForm.cs`** — button rows moved into a docked footer; `Load` sizes width to `DesignClientWidth × (DeviceDpi/96)` above 100% and reserves footer height; a small slack prevents a spurious scrollbar from `PreferredSize` measurement drift.
+- **`SyncthingPause/SyncthingUpdateDialog.cs`** — post-action button re-center → physical-px math; marquee step/width → `LogicalToDeviceUnits`, fill height → container height; action button → AutoSize.
+- **`SyncthingPause/UpdateDialog.cs`** — button width 100 → 130; corrected a comment that overclaimed the old 100-wide fit "even at 200% DPI".
+- **`SyncthingPause/OsdToolTip.cs`** — `ShowMessage` wrap width / padding / edge margin wrapped in `LogicalToDeviceUnits`.
+- **`SyncthingPause/DiagRender.cs`** — added `SyncthingUpdateDialog` + `OsdToolTip` render cases (DEBUG-only DPI verification harness).
+- **`SyncthingPause.Tests/DpiLayoutRegressionTests.cs`** — new guards: every form declares `AutoScaleMode.Dpi`; SettingsForm's Save button lives outside the AutoScroll viewport.
+- **`SyncthingPause.csproj`** — 3.2.11 → 3.2.12.
+
+### Verifier coverage
+
+Build clean (0 warnings, 0 errors). 94/94 tests pass (2 new DPI regression guards). Every form rendered at real 150% (`DeviceDpi=144`) on the Tiny11Lab Hyper-V VM and verified proportionally identical to its 100% layout; offscreen `DrawToBitmap` was confirmed equal to on-screen capture, so the render method is trustworthy.
+
 ## v3.2.11 — 2026-05-18
 
 ### Fix: v3.2.10 verifier-round cleanups — close-path bypass, defensive resets, dead-catch strip

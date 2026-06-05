@@ -51,6 +51,12 @@ internal sealed class SettingsForm : Form
     // of the palette directly from Theme.* per render.
     private static readonly Color BgColor = Theme.Bg;
 
+    // 96-DPI design CLIENT width. Above 100% the Load handler sizes the form to
+    // DesignClientWidth * (DeviceDpi/96) instead of the AutoSize content width, which
+    // under-measures at high DPI (a Fill field's PreferredSize is its 96-DPI literal
+    // width). 100% is unaffected — it keeps the natural measured width.
+    private const int DesignClientWidth = 450;
+
     public SettingsForm(AppConfig config, SyncthingApi api, OsdToolTip osd, Action onApplied, Action onSaved)
     {
         _config = config;
@@ -99,11 +105,34 @@ internal sealed class SettingsForm : Form
         // Load (handle exists + AutoScale has run → ContentSize is device-DPI accurate).
         Load += (_, _) =>
         {
-            var content = stack.ContentSize;
-            int availH = Screen.FromControl(this).WorkingArea.Height - LogicalToDeviceUnits(80);
-            int w = content.Width, h = content.Height;
-            if (h > availH) { h = availH; w += SystemInformation.VerticalScrollBarWidth; }
-            ClientSize = new Size(w, h);
+            // Cards scroll inside the AutoScroll host; the button bar is a docked footer
+            // OUTSIDE that host (so it never falls below the scroll fold at 150%). Size the
+            // window to: cards content (clamped to the work area) PLUS the footer height.
+            var content = stack.ContentSize;                       // cards only — buttons are in the footer
+            int footerH = stack.Footer?.PreferredSize.Height ?? 0;
+            var wa = Screen.FromControl(this).WorkingArea;
+            int availH = wa.Height - LogicalToDeviceUnits(80) - footerH;
+            int cardsH = content.Height;
+            bool clamp = cardsH > availH;
+            if (clamp) cardsH = availH;
+            // Content fits: add a few device-px of slack so PreferredSize measurement drift
+            // (Load-time prediction runs a hair short of the finalized layout) doesn't trip a
+            // spurious AutoScroll scrollbar. Invisible when content genuinely fits.
+            else cardsH += LogicalToDeviceUnits(6);
+
+            // Width: AutoSize content under-measures at high DPI — a Fill field's PreferredSize
+            // reports its 96-DPI literal width (it only STRETCHES when given room), so the measured
+            // stack lands ~1.2x, not 1.5x. Mirror EQSwitch UI/SettingsForm: above 100% take the width
+            // from a design baseline * the DPI factor, so the Dock=Top stack + Fill fields stretch to
+            // a true 1.5x. At 100% keep the measured width (baseline unchanged).
+            double f = DeviceDpi / 96.0;
+            int w = content.Width;
+            if (f > 1.001) w = Math.Max(w, (int)Math.Round(DesignClientWidth * f));
+            if (clamp) w += SystemInformation.VerticalScrollBarWidth;
+            w = Math.Min(w, wa.Width);
+            // The footer's button rows don't scroll horizontally, so the form must fit them too.
+            w = Math.Max(w, stack.Footer?.PreferredSize.Width ?? 0);
+            ClientSize = new Size(w, cardsH + footerH);
         };
 
         // First-run auto-open can land behind a fullscreen app (game, video) since
@@ -616,7 +645,9 @@ internal sealed class SettingsForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             WrapContents = false,
             FlowDirection = FlowDirection.LeftToRight,
+            Anchor = AnchorStyles.Left,
             Padding = Padding.Empty,
+            Margin = Padding.Empty,
             BackColor = Color.Transparent,
         };
         foreach (var b in new[] { btnGitHub, btnUpdate, btnSyncthing, btnHelp, btnCheck })
@@ -624,7 +655,6 @@ internal sealed class SettingsForm : Form
             b.Margin = new Padding(0, 0, 6, 0);
             top.Controls.Add(b);
         }
-        stack.AddFullWidth(top);
 
         var btnSave = Fields.Primary("Save");
         btnSave.Click += OnSave;
@@ -633,7 +663,26 @@ internal sealed class SettingsForm : Form
         var btnCancel = Fields.Button("Cancel");
         btnCancel.DialogResult = DialogResult.Cancel;
         btnCancel.Click += (_, _) => Close();
-        stack.AddFullWidth(Bars.Split(Array.Empty<Control>(), new Control[] { btnSave, btnApply, btnCancel }));
+
+        // Pin both button rows in a footer DOCKED below the scroll viewport so the primary
+        // actions stay visible when the cards scroll at 150%. Pre-fix these were AddFullWidth'd
+        // INTO the AutoScroll stack and fell below the fold (Save/Apply/Cancel clipped off-frame).
+        var footer = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Bg,
+            Padding = new Padding(8, 4, 8, 6),
+            Margin = Padding.Empty,
+        };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        footer.Controls.Add(top, 0, 0);
+        footer.Controls.Add(Bars.Split(Array.Empty<Control>(), new Control[] { btnSave, btnApply, btnCancel }), 0, 1);
+        stack.SetFooter(footer);
 
         AcceptButton = btnSave;
         CancelButton = btnCancel;

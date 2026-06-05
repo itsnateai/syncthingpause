@@ -120,6 +120,22 @@ internal static class DiagRender
                 return new HelpForm(Path.Combine(Path.GetTempPath(), "stub.ini"), (_, _) => { });
             case "UpdateDialog":
                 return new UpdateDialog();
+            case "SyncthingUpdateDialog":
+            {
+                var config = StubConfig();
+                var api = new SyncthingApi(config);
+                // Renders the initial "version available" state — the ctor does NO network call
+                // (the POST/poll only fire on Upgrade Now), so the two-button layout captures clean.
+                return new SyncthingUpdateDialog(api, "v1.0.0", "v1.2.0");
+            }
+            case "OsdToolTip":
+            {
+                // A long, wrapping message exercises the runtime LogicalToDeviceUnits sizing
+                // (wrap width / padding) that ShowMessage computes after PerformAutoScale.
+                var osd = new OsdToolTip();
+                osd.ShowMessage("Settings applied — Syncthing is now syncing 3 of 5 folders to 2 connected devices.", 99000);
+                return osd;
+            }
             default:
                 throw new ArgumentException($"DiagRender: unknown form '{name}'");
         }

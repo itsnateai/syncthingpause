@@ -149,6 +149,44 @@ internal sealed class CardStack
     /// the host form to its content, then clamp to the work area (AutoScroll the rest).</summary>
     public Size ContentSize => _stack.PreferredSize;
 
+    /// <summary>A control pinned below the scroll viewport via <see cref="SetFooter"/>, or null.
+    /// Forms read its size when laying out so the scroll area is the client minus the footer.</summary>
+    public Control? Footer { get; private set; }
+
+    /// <summary>Pin a control to the bottom of the form, OUTSIDE the AutoScroll viewport, so the
+    /// primary actions (Save/Cancel) stay visible when the cards scroll at high DPI. Re-parents the
+    /// scroll Host + the footer into a 2-row root TableLayoutPanel (host fills row 0, footer hugs
+    /// row 1) — the same deterministic row ordering HelpForm uses, with no Dock z-order ambiguity
+    /// (sibling Dock=Fill + Dock=Bottom is order-dependent and easy to get backwards). No-op in raw
+    /// (non-scroll) mode, where Host == the stack and there is no separate viewport to pin against.</summary>
+    public void SetFooter(Control footer)
+    {
+        var parent = Host.Parent;
+        if (parent == null || ReferenceEquals(Host, _stack)) return;
+        parent.Controls.Remove(Host);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = Theme.Bg,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f)); // scroll host fills the space above
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // footer hugs its button rows
+
+        Host.Dock = DockStyle.Fill;
+        root.Controls.Add(Host, 0, 0);
+        footer.Dock = DockStyle.Fill;
+        root.Controls.Add(footer, 0, 1);
+
+        parent.Controls.Add(root);
+        Footer = footer;
+    }
+
     /// <summary>Add a styled card (emoji + coloured title + accent bar + hover border).
     /// Empty title ⇒ header-less card.</summary>
     public Card NewCard(string emoji, string title, Color titleColor)

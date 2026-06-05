@@ -61,7 +61,12 @@ internal sealed class UpdateDialog : Form
     // Pre-v3.2.4 each handler used `new Point(170, 112)` — a hardcoded mid-point
     // for the old 420-wide form's 110-wide button, off-center by 15 px and stale
     // the moment the geometry changes.
-    private const int _btnW = 100;
+    // 130 (was 100): a 100-wide button snugly fit "Upgrade Now" at 100% but CLIPPED "Now" at 150%
+    // (fixed bounds lag the 1.5x font — confirmed on the Tiny11Lab 150% render). 130 gives the
+    // text comfortable margin at every scale while keeping the fixed-width symmetric two-button row
+    // (so CenterX's row-centering math stays valid — AutoSize here would overlap the relatively-
+    // positioned Cancel). The progress/label widths are independent of this.
+    private const int _btnW = 130;
     private const int _btnRowY = 108;
 
     // Theme-aware caches — Theme.Initialize runs before this class is first
@@ -165,9 +170,9 @@ internal sealed class UpdateDialog : Form
         // v3.2.4: two-button row centered as a unit (left x = CenterX(BtnRowW)).
         // Pre-v3.2.4 buttons were 110 wide at hardcoded x=166/296 in a 420-wide
         // form — visually 11 px right of center, which read as a subtle layout
-        // imbalance even at 100 % DPI. 100-wide buttons at the new geometry
-        // ("Upgrade Now" = ~80 px text + 20 px chrome) fit comfortably even at
-        // 200 % DPI.
+        // imbalance even at 100 % DPI. 130-wide buttons (bumped from 100, which snugly fit
+        // "Upgrade Now" at 100% but CLIPPED "Now" at 150% — fixed bounds lag the scaled font,
+        // confirmed on the Tiny11Lab 150% render) keep the text comfortable at every DPI.
         int btnRowLeft = CenterX(BtnRowW);
         _btnAction = new Button
         {

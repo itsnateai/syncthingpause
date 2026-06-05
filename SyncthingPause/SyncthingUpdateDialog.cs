@@ -171,7 +171,13 @@ internal sealed class SyncthingUpdateDialog : Form
         {
             Text = "Upgrade Now",
             Location = new Point(166, 112),
-            Size = new Size(110, 32),
+            // AutoSize so the button follows the FONT at high DPI instead of clipping "Now". A fixed
+            // Size(110) is a snug fit at 100% that the 1.5x font tips into a clip at 150% (the bounds
+            // lag the font). MinimumSize floors it at the design width for symmetry with Cancel; the
+            // gap to Cancel (x=296) absorbs the growth without overlap.
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(110, 32),
             FlatStyle = FlatStyle.Flat,
             ForeColor = FgColor,
             BackColor = BgColor,
@@ -209,12 +215,16 @@ internal sealed class SyncthingUpdateDialog : Form
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
         _marqueeTimer.Tick += (_, _) =>
         {
-            const int step = 4, barW = 80;
+            // step/barW are computed at runtime (after PerformAutoScale) — route through
+            // LogicalToDeviceUnits so the marquee bar's screen size stays proportional to the
+            // (already physical-px) _progressOuter at every DPI; fill height tracks the container.
+            // Matches UpdateDialog's marquee, which was DPI-corrected in v3.2.5.
+            int step = LogicalToDeviceUnits(4), barW = LogicalToDeviceUnits(80);
             if (_marqueeForward) _marqueePos += step; else _marqueePos -= step;
             if (_marqueePos + barW >= _progressOuter.Width) _marqueeForward = false;
             if (_marqueePos <= 0) _marqueeForward = true;
             _progressFill.Location = new Point(_marqueePos, 0);
-            _progressFill.Size = new Size(barW, 18);
+            _progressFill.Size = new Size(barW, _progressOuter.Height);
         };
     }
 
@@ -291,7 +301,7 @@ internal sealed class SyncthingUpdateDialog : Form
 
         _marqueeTimer.Stop();
         _progressFill.Location = new Point(0, 0);
-        _progressFill.Size = new Size(0, 18);
+        _progressFill.Size = new Size(0, _progressOuter.Height);
         _progressOuter.Visible = false;
 
         if (flipped)
@@ -300,7 +310,7 @@ internal sealed class SyncthingUpdateDialog : Form
             _lblStatus.ForeColor = OkColor;
             _lblDetail.Text = $"Syncthing is now running {_latest}.";
             _btnCancel.Text = "Close";
-            _btnCancel.Location = new Point(170, 112);
+            _btnCancel.Location = new Point((ClientSize.Width - _btnCancel.Width) / 2, _btnAction.Top);
             TrayLog.Info($"Syncthing upgrade confirmed: now running {_latest}.");
             UpdateDialog.ShowToast($"✅ Syncthing updated to {_latest}!");
         }
@@ -313,7 +323,7 @@ internal sealed class SyncthingUpdateDialog : Form
             _lblStatus.ForeColor = WarnColor;
             _lblDetail.Text = "Check the tray icon shortly to confirm.";
             _btnCancel.Text = "OK";
-            _btnCancel.Location = new Point(170, 112);
+            _btnCancel.Location = new Point((ClientSize.Width - _btnCancel.Width) / 2, _btnAction.Top);
             TrayLog.Warn($"Syncthing upgrade: {PollTimeout.TotalSeconds:F0}s poll timeout, version flip not observed. Last status={_lastPollStatus}.");
         }
         // Symmetric clear with ShowError: dialog has reached its terminal state
@@ -495,7 +505,7 @@ internal sealed class SyncthingUpdateDialog : Form
         _lblDetail.Text = detail;
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
-        _btnCancel.Location = new Point(170, 112);
+        _btnCancel.Location = new Point((ClientSize.Width - _btnCancel.Width) / 2, _btnAction.Top);
         _busy = false;
     }
 

@@ -86,15 +86,21 @@ internal sealed class OsdToolTip : Form
 
         _label.Text = text;
 
-        // Size to content
-        var textSize = TextRenderer.MeasureText(text, _label.Font, new Size(400, 0), TextFormatFlags.WordBreak);
-        Size = new Size(textSize.Width + 20, textSize.Height + 16);
+        // Size to content. The wrap-width, padding, and screen-edge margin are computed HERE at
+        // runtime — after PerformAutoScale has run — so AutoScaleMode.Dpi never touches them. Route
+        // each through LogicalToDeviceUnits so the OSD grows with the display scale (raw literals
+        // wrap the text too early + under-pad at 150%). The wrap width must track the label's
+        // MaximumSize, which AutoScaleMode DID scale at construction (400 -> 600 at 150%).
+        var textSize = TextRenderer.MeasureText(text, _label.Font,
+            new Size(LogicalToDeviceUnits(400), 0), TextFormatFlags.WordBreak);
+        Size = new Size(textSize.Width + LogicalToDeviceUnits(20), textSize.Height + LogicalToDeviceUnits(16));
 
         // Position just above the system tray (bottom-right of working area)
         var screen = Screen.PrimaryScreen?.WorkingArea ?? Screen.FromPoint(Cursor.Position).WorkingArea;
+        int edge = LogicalToDeviceUnits(8);
         var pos = new Point(
-            screen.Right - Width - 8,
-            screen.Bottom - Height - 8
+            screen.Right - Width - edge,
+            screen.Bottom - Height - edge
         );
 
         Location = pos;
