@@ -4,6 +4,29 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.14 — 2026-06-04
+
+### Internal: post-ship verification hygiene (no user-facing change)
+
+A second adversarial verification swarm (3 topic pairs, Sonnet + Opus, read-only) on the v3.2.13 DPI rebuild confirmed the shipped binary correct and the self-update security paths byte-identical, and surfaced four source-hygiene items — all behavior-neutral, all closed here:
+
+- **Removed dead code.** `DpiScale.SizeFitFields` was ported from EQSwitch's CardLayout but its call site was never wired (zero callers). Deleted the class + its now-unused `System.Globalization` using, and corrected a SettingsForm comment that falsely claimed the method ran (the fixed 80px startup-delay field holds its 4-digit max at any DPI via AutoScaleMode).
+- **Hardened `CardStack.SetFooter`** against a double-call that would nest two root panels (latent footgun; no current caller hits it).
+- **Strengthened the DPI regression test** to also assert `AutoScaleDimensions == 96×96` — dropping that baseline while keeping `AutoScaleMode.Dpi` silently re-introduces double-scaling, which the prior test wouldn't have caught.
+
+No runtime behavior changed; the v3.2.13 and v3.2.14 binaries are functionally identical. This release exists to keep `main` and the published release in lockstep.
+
+### What's underneath
+
+- **`SyncthingPause/CardLayout.cs`** — deleted the unused `DpiScale` class + `System.Globalization` using; added a `Footer != null` guard to `SetFooter`.
+- **`SyncthingPause/SettingsForm.cs`** — corrected the startup-delay field comment.
+- **`SyncthingPause.Tests/DpiLayoutRegressionTests.cs`** — added `AutoScaleDimensions` assertions.
+- **`SyncthingPause.csproj`** — 3.2.13 → 3.2.14.
+
+### Verifier coverage
+
+Build clean (0/0). 94/94 tests pass (the regression guard now also pins the 96-DPI baseline). Two adversarial swarms + five real-150% renders + CI asset-verification stand behind the shipped layout.
+
 ## v3.2.13 — 2026-06-04
 
 ### Hardening: post-ship verification swarm — DPI-scale the toast corner margin
