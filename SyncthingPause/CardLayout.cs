@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // © itsnateai
 
-using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace SyncthingPause;
@@ -162,7 +161,7 @@ internal sealed class CardStack
     public void SetFooter(Control footer)
     {
         var parent = Host.Parent;
-        if (parent == null || ReferenceEquals(Host, _stack)) return;
+        if (parent == null || ReferenceEquals(Host, _stack) || Footer != null) return;
         parent.Controls.Remove(Host);
 
         var root = new TableLayoutPanel
@@ -560,49 +559,6 @@ internal static class Fields
         b.FlatAppearance.BorderColor = Theme.AccentGreen;
         b.ForeColor = Theme.AccentGreen;
         return b;
-    }
-}
-
-/// <summary>
-/// Manual DPI width-scaling for fixed-width fit inputs (numerics, fit combos). Layout
-/// containers handle positions + heights (font-driven) and the form scales its ClientSize,
-/// but a fit field's literal WIDTH doesn't always grow on its own — so a 4-digit numeric or
-/// a long combo item clips at 150%. This sizes each to ITS content at the device DPI, once
-/// at Load. Fill fields (Anchor includes Right, or Dock=Fill) already stretch, so they're skipped.
-/// </summary>
-internal static class DpiScale
-{
-    public static void SizeFitFields(Control root)
-    {
-        foreach (Control c in root.Controls)
-        {
-            if (c.Dock == DockStyle.None && !c.Anchor.HasFlag(AnchorStyles.Right))
-            {
-                int w = 0;
-                if (c is NumericUpDown nud)
-                {
-                    string max = nud.Maximum.ToString(
-                        nud.DecimalPlaces > 0 ? "F" + nud.DecimalPlaces : "0", CultureInfo.InvariantCulture);
-                    w = TextRenderer.MeasureText(max, nud.Font).Width + nud.LogicalToDeviceUnits(26); // digits + spinner + border + pad
-                }
-                else if (c is ComboBox cb && cb.Items.Count > 0)
-                {
-                    int t = 0;
-                    foreach (var it in cb.Items)
-                        t = Math.Max(t, TextRenderer.MeasureText(it?.ToString() ?? string.Empty, cb.Font).Width);
-                    w = t + cb.LogicalToDeviceUnits(34); // text + dropdown arrow + border + pad
-                }
-                if (w > 0)
-                {
-                    c.Width = w;
-                    c.MinimumSize = new Size(w, c.MinimumSize.Height);
-                }
-            }
-            // Don't descend into a leaf field's own internals (a NumericUpDown's
-            // inner edit/buttons, a ComboBox's edit) — only walk container children.
-            if (c is not (NumericUpDown or ComboBox or TextBox))
-                SizeFitFields(c);
-        }
     }
 }
 

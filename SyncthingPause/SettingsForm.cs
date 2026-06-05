@@ -175,7 +175,8 @@ internal sealed class SettingsForm : Form
 
         // Windows startup delay — gap between tray launch and Syncthing launch (lets the
         // network stack settle on auto-startup). Spin in 5s steps or type any value [0, 3600].
-        // DpiScale.SizeFitFields widens the NUD to its 4-digit Maximum at the device DPI.
+        // The fixed 80px holds the 4-digit Maximum ("3600") + spinner at any DPI — AutoScaleMode
+        // scales the width with the font (~120px at 150%, content ~67px), so no content-fit pass is needed.
         _nudDelay = Fields.Numeric(0, 3600, _config.StartupDelay, width: 80, increment: 5);
         _nudDelay.AccessibleName = "Windows startup delay in seconds";
         card.FlowRow("Windows startup delay:", _nudDelay, Fields.Label("seconds"));

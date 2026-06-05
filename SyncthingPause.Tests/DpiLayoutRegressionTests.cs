@@ -56,9 +56,14 @@ public class DpiLayoutRegressionTests
             try
             {
                 foreach (var f in forms)
+                {
                     Assert.AreEqual(AutoScaleMode.Dpi, f.AutoScaleMode,
                         f.GetType().Name + " must declare AutoScaleMode.Dpi — the per-control scaling foundation.");
+                    Assert.AreEqual(new SizeF(96F, 96F), f.AutoScaleDimensions,
+                        f.GetType().Name + " must pin the 96-DPI design baseline (dropping it while keeping Dpi mode re-introduces double-scaling at 150%).");
+                }
                 Assert.AreEqual(AutoScaleMode.Dpi, osd.AutoScaleMode, "OsdToolTip must declare AutoScaleMode.Dpi.");
+                Assert.AreEqual(new SizeF(96F, 96F), osd.AutoScaleDimensions, "OsdToolTip must pin the 96-DPI design baseline.");
             }
             finally
             {
