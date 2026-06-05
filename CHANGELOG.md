@@ -4,6 +4,25 @@
 
 All notable changes to SyncthingPause (formerly SyncthingTray, renamed at v3.0.0) are documented here.
 
+## v3.2.13 — 2026-06-04
+
+### Hardening: post-ship verification swarm — DPI-scale the toast corner margin
+
+A 4-agent adversarial review (paired Sonnet + Opus, read-only) of the v3.2.12 DPI rebuild confirmed all five form fixes correct and the security-sensitive self-update paths byte-identical (one agent compiled + ran WinForms probes to measure the button gaps: 20 → 24 → 30 → 40 px across 100/125/150/200%, never closing). It surfaced two minor *pre-existing* items, both closed here:
+
+- **`ToastWindow` corner margin wasn't DPI-scaled.** The post-update "✅ updated to vX!" toast positioned itself with a raw `20`px screen-corner margin in its `Load` handler (which runs after auto-scaling), so at 150% it sat ~10px closer to the corner than intended. Cosmetic — the toast was never clipped — but inconsistent with `OsdToolTip`'s DPI-correct margin. Now `LogicalToDeviceUnits(20)`.
+- **`SettingsForm` work-area math hardened.** Added a `Math.Max(0, …)` floor on the clamped card-area height — a no-op for every real footer (a couple of button rows), pure defense-in-depth against a pathologically tall footer producing a negative size.
+
+### What's underneath
+
+- **`SyncthingPause/UpdateDialog.cs`** — `ToastWindow.Load` corner margin → `LogicalToDeviceUnits(20)`.
+- **`SyncthingPause/SettingsForm.cs`** — clamped `cardsH` floored at 0.
+- **`SyncthingPause.csproj`** — 3.2.12 → 3.2.13.
+
+### Verifier coverage
+
+Build clean (0/0). 94/94 tests pass. Both changes are no-ops at 100% and in all real-world layouts; the toast fix uses the same `LogicalToDeviceUnits` pattern already verified on `OsdToolTip` at real 150%.
+
 ## v3.2.12 — 2026-06-04
 
 ### Fix: DPI layout-container rebuild — every window scales proportionally at 150%

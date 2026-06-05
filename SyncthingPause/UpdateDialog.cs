@@ -949,8 +949,11 @@ internal sealed class UpdateDialog : Form
             Controls.Add(lbl);
 
             var screen = (Screen.PrimaryScreen ?? Screen.AllScreens[0]).WorkingArea;
+            // Corner margin via LogicalToDeviceUnits: this runs in Load (after PerformAutoScale), so a
+            // raw 20 would NOT DPI-scale — the toast would sit ~10px too close to the corner at 150%.
+            // Matches OsdToolTip's DPI-correct edge margin.
             Load += (_, _) => Location = new Point(
-                screen.Right - Width - 20, screen.Bottom - Height - 20);
+                screen.Right - Width - LogicalToDeviceUnits(20), screen.Bottom - Height - LogicalToDeviceUnits(20));
 
             _dismiss = new System.Windows.Forms.Timer { Interval = 5000 };
             _dismiss.Tick += (_, _) =>

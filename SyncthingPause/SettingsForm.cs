@@ -114,7 +114,7 @@ internal sealed class SettingsForm : Form
             int availH = wa.Height - LogicalToDeviceUnits(80) - footerH;
             int cardsH = content.Height;
             bool clamp = cardsH > availH;
-            if (clamp) cardsH = availH;
+            if (clamp) cardsH = Math.Max(0, availH);   // floor: a pathologically tall footer can't drive a negative size
             // Content fits: add a few device-px of slack so PreferredSize measurement drift
             // (Load-time prediction runs a hair short of the finalized layout) doesn't trip a
             // spurious AutoScroll scrollbar. Invisible when content genuinely fits.
